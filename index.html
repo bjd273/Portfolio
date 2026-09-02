@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bennett Daniel — Robotics &amp; Control Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Achromatic shell. The only chromatic light on this page comes from the
+    project cards themselves, each carrying the hue of its own project page
+    (green = Double Pendulum, gold = Robot Navigation, grey = not yet built).
+    Single committed dark world, matching the project pages.
+  */
+  :root {
+    --void: #08090a;
+    --deep: #0d0f11;
+    --panel: #121417;
+    --panel-2: #191c20;
+    --ink: #eceef0;
+    --dim: #798088;
+    --dimmer: #4d545b;
+    --line: rgba(236,238,240,0.10);
+    --line-soft: rgba(236,238,240,0.055);
+
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  .shell { position: relative; min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+
+  /* Hand-off to a project page: the shell fades before navigation so the two
+     documents read as one continuous move. */
+  body { transition: opacity 0.26s ease; }
+  body.leaving { opacity: 0; }
+
+  /* ---------------- Masthead ---------------- */
+  .masthead {
+    position: relative; z-index: 5;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 24px; padding: 30px 34px 0; flex-wrap: wrap;
+  }
+  .ident .name {
+    font-family: var(--font-display); font-weight: 700; font-size: 1.06rem;
+    letter-spacing: -0.01em; margin: 0; color: var(--ink);
+  }
+  .ident .disc {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--dim); margin: 5px 0 0;
+  }
+  .status {
+    font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--dimmer); text-align: right;
+    display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+  }
+  .status .live { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); }
+  .status .live::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--dim); animation: blip 2.4s ease-in-out infinite;
+  }
+  @keyframes blip { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+  /* ---------------- Stage ---------------- */
+  .stage {
+    position: relative; min-height: 74vh; overflow: hidden;
+    touch-action: none; cursor: grab;
+  }
+  .stage.dragging { cursor: grabbing; }
+  #globe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+
+  /* Sits between the sphere and the cards so an expanded card's body text has
+     real contrast instead of reading straight off the wireframe. */
+  .scrim {
+    position: absolute; inset: 0; z-index: 50;
+    background: radial-gradient(ellipse at center, rgba(8,9,10,0.82) 0%, rgba(8,9,10,0.62) 55%, rgba(8,9,10,0.42) 100%);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.42s ease;
+  }
+  .scrim.on { opacity: 1; }
+
+  .stage-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--dimmer); pointer-events: none;
+    text-align: center; z-index: 6; transition: opacity 0.4s ease;
+  }
+  .stage-hint.hushed { opacity: 0; }
+
+  /* ---------------- Project cards ---------------- */
+  .card {
+    position: absolute; left: 0; top: 0;
+    width: 168px;
+    background: linear-gradient(180deg, var(--panel) 0%, var(--deep) 100%);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+    transform-origin: 50% 50%;
+    /* Width is intentionally NOT transitioned: animating it reflows the blurb
+       through a dozen ragged intermediate widths. It snaps, and the body
+       sliding open carries the motion instead. */
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    will-change: transform, opacity;
+  }
+  .card:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .card.hidden { display: none; }
+  .card.selected {
+    width: 328px; z-index: 999 !important; cursor: default;
+    max-height: 92%; overflow-y: auto;   /* safety on short viewports */
+  }
+  .card.dimmed { pointer-events: none; }
+
+  .card-preview { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--void); }
+  .card-preview canvas { display: block; width: 100%; height: 100%; }
+
+  .card-head {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 9px 11px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .card-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; margin-top: 5px; }
+  /* Titles wrap to two lines rather than truncating — "Adaptive Cruise Control"
+     and "14-DOF Vehicle Model" must both read in full. */
+  .card-title {
+    font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.03em;
+    text-transform: uppercase; flex: 1 1 auto;
+    line-height: 1.3; overflow-wrap: break-word;
+  }
+  .card-seq { font-family: var(--font-mono); font-size: 0.6rem; color: var(--dimmer); flex: 0 0 auto; margin-top: 2px; }
+
+  /* expanded region */
+  .card-body {
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height 0.34s cubic-bezier(0.2,0.7,0.3,1), opacity 0.22s ease;
+  }
+  .card.selected .card-body { max-height: 340px; opacity: 1; }
+  .card-body-inner { padding: 2px 13px 13px; }
+  .card-blurb { font-size: 0.83rem; line-height: 1.5; color: var(--dim); margin: 0 0 11px; }
+  .card-meta { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 12px; }
+  .card-meta span {
+    font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.05em;
+    color: var(--dim); border: 1px solid var(--line); border-radius: 2px; padding: 3px 6px;
+  }
+  .card-cta {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em;
+    text-transform: uppercase; text-decoration: none;
+    color: var(--void); border: 1px solid transparent; border-radius: 2px;
+    padding: 10px 12px; transition: filter 0.15s ease;
+  }
+  .card-cta:hover { filter: brightness(1.07); }
+  .card-cta:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .card-cta.disabled {
+    background: transparent !important; color: var(--dimmer);
+    border-color: var(--line); pointer-events: none;
+  }
+
+  /* ---------------- Index ---------------- */
+  .index { position: relative; z-index: 5; border-top: 1px solid var(--line-soft); padding: 18px 34px 30px; }
+  .index-head {
+    font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--dimmer); margin: 0 0 12px;
+  }
+  .index-list {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft);
+  }
+  .index-list li { background: var(--void); }
+  .index-list a {
+    display: flex; align-items: baseline; gap: 9px; padding: 11px 13px;
+    text-decoration: none; color: var(--dim);
+    font-family: var(--font-mono); font-size: 0.72rem; transition: background 0.18s ease, color 0.18s ease;
+  }
+  .index-list a:hover, .index-list a:focus-visible, .index-list a.active {
+    background: var(--panel-2); color: var(--ink); outline: none;
+  }
+  .index-list .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; transform: translateY(-1px); }
+  .index-list .idx { color: var(--dimmer); font-size: 0.64rem; }
+
+  @media (max-width: 820px) {
+    .masthead { padding: 22px 20px 0; }
+    .stage { min-height: 60vh; }
+    .card { width: 146px; }
+    .card.selected { width: min(300px, calc(100vw - 40px)); }
+    .index { padding: 16px 20px 26px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status .live::before { animation: none; opacity: 0.8; }
+    .card { transition: none; }
+    .card-body { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <header class="masthead">
+    <div class="ident">
+      <p class="name">Bennett Daniel</p>
+      <p class="disc">Robotics &middot; Control Systems &middot; Vehicle Dynamics</p>
+    </div>
+    <div class="status">
+      <span class="live" id="status-count">2 projects live</span>
+      <span id="status-sub">5 queued</span>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="globe"></canvas>
+    <div class="scrim" id="scrim"></div>
+    <p class="stage-hint" id="stage-hint">Drag to rotate &nbsp;·&nbsp; Select a card to read more</p>
+  </main>
+
+  <nav class="index" aria-label="All projects">
+    <p class="index-head">Index</p>
+    <ul class="index-list" id="index-list"></ul>
+  </nav>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Decorative motion is suppressed under reduced-motion; the simulations
+  // themselves keep running, since they are the content rather than decoration.
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var C = {
+    void: "8,9,10",
+    ink: "236,238,240",
+    dim: "121,128,136",
+    dimmer: "77,84,91",
+    pendulum: "52,226,160",
+    robot: "255,207,63",
+    queued: "90,97,105"
+  };
+
+  var PROJECTS = [
+    {
+      id: "pendulum", title: "Double Pendulum", kind: "Live",
+      rgb: C.pendulum, hex: "#34e2a0",
+      url: "projects/double-pendulum.html", sim: "pendulum",
+      blurb: "Two coupled rods, exact Lagrangian equations, and a 0.05° starting nudge that grows into total divergence. Chaos you can reach in and perturb yourself.",
+      meta: ["Lagrangian mechanics", "RK4", "Chaos"]
+    },
+    {
+      id: "robot", title: "Robot Navigation", kind: "Live",
+      rgb: C.robot, hex: "#ffcf3f",
+      url: "projects/robot-navigation.html", sim: "robot",
+      blurb: "A grid where every move can slide sideways, and the slip odds depend on momentum. Backward induction over 1,681 states, stress-tested live.",
+      meta: ["Dynamic programming", "Stochastic MDP", "Monte Carlo"]
+    },
+    {
+      id: "acc", title: "Adaptive Cruise Control", kind: "Queued",
+      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
+      blurb: "Robust vehicle-following design: PID spacing control, two independent uncertainty models cross-validated, then μ-analysis and worst-case gain against real recorded highway data.",
+      meta: ["μ-analysis", "LFT uncertainty", "Simulink"]
+    },
+    {
+      id: "veh14", title: "14-DOF Vehicle Model", kind: "Queued",
+      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
+      blurb: "Full multibody passenger vehicle — 1,405 blocks, Stateflow suspension kinematics, and swappable Magic Formula / Fiala / Dugoff tire models side by side.",
+      meta: ["Multibody dynamics", "Tire models", "K&C suspension"]
+    },
+    {
+      id: "suspension", title: "Active Suspension", kind: "Queued",
+      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
+      blurb: "Quarter-car H∞ versus H2 synthesis across three ride tunings — comfort, balanced, sport — with robustness margins and a road-bump time response.",
+      meta: ["H∞ / H2", "Mixed sensitivity", "Quarter-car"]
+    },
+    {
+      id: "aircraft", title: "Aircraft Pitch Control", kind: "Queued",
+      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
+      blurb: "Mixed-sensitivity H∞ design on a short-period longitudinal model, iterated across six weighting-function revisions with the reasoning kept in the loop.",
+      meta: ["H∞ synthesis", "Weight design", "Flight dynamics"]
+    },
+    {
+      id: "solar", title: "Solar Racing Vehicle", kind: "Queued",
+      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
+      blurb: "Longitudinal performance model for a solar race car: rolling and aerodynamic resistance, motor torque curves, and the traction limit that caps acceleration.",
+      meta: ["Longitudinal dynamics", "Powertrain", "Traction limit"]
+    }
+  ];
+
+  // Even spread over the sphere (Fibonacci), so no two cards crowd each other.
+  (function () {
+    var n = PROJECTS.length, ga = Math.PI * (3 - Math.sqrt(5));
+    for (var i = 0; i < n; i++) {
+      var y = 1 - ((i + 0.5) / n) * 2;
+      var r = Math.sqrt(Math.max(0, 1 - y * y));
+      var th = ga * i;
+      PROJECTS[i].pos = { x: Math.cos(th) * r, y: y, z: Math.sin(th) * r };
+    }
+  })();
+
+  // ---------------- Sphere geometry ----------------
+  function sph(latDeg, lonDeg) {
+    var la = latDeg * Math.PI / 180, lo = lonDeg * Math.PI / 180;
+    return { x: Math.cos(la) * Math.sin(lo), y: Math.sin(la), z: Math.cos(la) * Math.cos(lo) };
+  }
+
+  var AMBIENT = [];
+  (function () {
+    var n = 300, ga = Math.PI * (3 - Math.sqrt(5));
+    for (var i = 0; i < n; i++) {
+      var y = 1 - (i / (n - 1)) * 2;
+      var r = Math.sqrt(Math.max(0, 1 - y * y));
+      var th = ga * i;
+      AMBIENT.push({ x: Math.cos(th) * r, y: y, z: Math.sin(th) * r });
+    }
+  })();
+
+  var RINGS = [];
+  (function () {
+    var lats = [-70, -47, -24, 0, 24, 47, 70], seg = 80, i, j;
+    for (i = 0; i < lats.length; i++) {
+      var pts = [];
+      for (j = 0; j <= seg; j++) pts.push(sph(lats[i], (j / seg) * 360 - 180));
+      RINGS.push(pts);
+    }
+    var lons = [-150, -100, -50, 0, 50, 100, 150];
+    for (i = 0; i < lons.length; i++) {
+      var mp = [];
+      for (j = 0; j <= seg; j++) mp.push(sph((j / seg) * 180 - 90, lons[i]));
+      RINGS.push(mp);
+    }
+  })();
+
+  function rot(p, yaw, pitch) {
+    var cy = Math.cos(yaw), sy = Math.sin(yaw);
+    var x = p.x * cy - p.z * sy;
+    var z = p.x * sy + p.z * cy;
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    return { x: x, y: p.y * cp - z * sp, z: p.y * sp + z * cp };
+  }
+
+  var stage = document.getElementById("stage");
+  var canvas = document.getElementById("globe");
+  var ctx = canvas.getContext("2d");
+  var W = 0, H = 0, CAM = 3.1;
+
+  function sizeGlobe() {
+    var dpr = window.devicePixelRatio || 1;
+    W = stage.clientWidth; H = stage.clientHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(sizeGlobe).observe(stage);
+  sizeGlobe();
+
+  var yaw = 0.4, pitch = -0.16;
+  var spin = reduced ? 0 : 0.0013;
+  var vYaw = 0, vPitch = 0;
+  var focusYaw = null, focusPitch = null;
+  var selected = null;
+
+  // Kept short enough that a card sitting on the sphere's silhouette still
+  // clears the stage edges — the stage clips overflow.
+  function radius() { return Math.max(110, Math.min(W * 0.30, H * 0.34)); }
+
+  function project(p) {
+    var f = CAM / (CAM - p.z), R = radius();
+    return { x: W / 2 + p.x * R * f, y: H / 2 - p.y * R * f, f: f };
+  }
+
+  function drawGlobe() {
+    var R = radius();
+    ctx.clearRect(0, 0, W, H);
+
+    var halo = ctx.createRadialGradient(W / 2, H / 2, R * 0.2, W / 2, H / 2, R * 1.5);
+    halo.addColorStop(0, "rgba(" + C.ink + ",0.028)");
+    halo.addColorStop(0.62, "rgba(" + C.ink + ",0.011)");
+    halo.addColorStop(1, "rgba(" + C.ink + ",0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = "rgba(" + C.ink + ",0.06)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, R, 0, Math.PI * 2); ctx.stroke();
+
+    for (var i = 0; i < RINGS.length; i++) {
+      var ring = RINGS[i], prev = null;
+      for (var j = 0; j < ring.length; j++) {
+        var rp = rot(ring[j], yaw, pitch), sp2 = project(rp);
+        if (prev) {
+          var depth = (rp.z + prev.z) * 0.5;
+          var a = depth > 0 ? 0.075 + depth * 0.062 : 0.024 + (depth + 1) * 0.026;
+          ctx.strokeStyle = "rgba(" + C.ink + "," + a.toFixed(3) + ")";
+          ctx.beginPath(); ctx.moveTo(prev.sx, prev.sy); ctx.lineTo(sp2.x, sp2.y); ctx.stroke();
+        }
+        prev = { sx: sp2.x, sy: sp2.y, z: rp.z };
+      }
+    }
+
+    for (var k = 0; k < AMBIENT.length; k++) {
+      var ap = rot(AMBIENT[k], yaw, pitch), s = project(ap);
+      var front = ap.z > 0;
+      var alpha = front ? 0.11 + ap.z * 0.26 : 0.04 + (ap.z + 1) * 0.04;
+      ctx.fillStyle = "rgba(" + C.ink + "," + alpha.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, (front ? 1.0 : 0.7) * s.f * 0.85, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Soft glow behind each live card, so the sphere reads as lit by its projects.
+    for (var n = 0; n < PROJECTS.length; n++) {
+      var p = PROJECTS[n];
+      if (p._z === undefined || p._z < -0.05) continue;
+      if (p.kind !== "Live") continue;
+      var dim = selected && selected !== p ? 0.2 : 1;
+      var g = ctx.createRadialGradient(p._sx, p._sy, 0, p._sx, p._sy, 90 * p._f);
+      g.addColorStop(0, "rgba(" + p.rgb + "," + (0.16 * dim).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(" + p.rgb + ",0)");
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(p._sx, p._sy, 90 * p._f, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ---------------- Simulations ----------------
+  // Pendulum — same equations and integrator as the full project page.
+  function PendulumSim() {
+    var P = { l1: 1, l2: 1, m1: 1, m2: 1, g: 9.8 };
+    var z = [86 * Math.PI / 180, 172 * Math.PI / 180, 0, 0];
+    var cleared = false;
+    function deriv(s) {
+      var q1 = s[0], q2 = s[1], q1d = s[2], q2d = s[3];
+      var c = Math.cos(q1 - q2), sn = Math.sin(q1 - q2);
+      var M11 = (P.m1 + P.m2) * P.l1 * P.l1;
+      var M12 = P.m2 * P.l1 * P.l2 * c, M21 = M12;
+      var M22 = P.m2 * P.l2 * P.l2;
+      var h1 = P.m2 * P.l1 * P.l2 * sn * q2d * q2d;
+      var h2 = -P.m2 * P.l1 * P.l2 * sn * q1d * q1d;
+      var G1 = (P.m1 + P.m2) * P.g * P.l1 * Math.sin(q1);
+      var G2 = P.m2 * P.g * P.l2 * Math.sin(q2);
+      var det = M11 * M22 - M12 * M21;
+      return [q1d, (-1 / det) * (M22 * (h1 + G1) - M12 * (h2 + G2)),
+              q2d, (1 / det) * (M21 * (h1 + G1) - M11 * (h2 + G2))];
+    }
+    function add(s, k, h) { return [s[0] + h * k[0], s[1] + h * k[1], s[2] + h * k[2], s[3] + h * k[3]]; }
+    function rk4(s, dt) {
+      var k1 = deriv(s), k2 = deriv(add(s, k1, dt / 2)), k3 = deriv(add(s, k2, dt / 2)), k4 = deriv(add(s, k3, dt));
+      return [s[0] + dt / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
+              s[1] + dt / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
+              s[2] + dt / 6 * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]),
+              s[3] + dt / 6 * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3])];
+    }
+    this.step = function (dt) {
+      var d = dt * 0.6; // same slow-motion factor as the full page
+      for (var i = 0; i < 6; i++) z = rk4(z, d / 6);
+    };
+    this.draw = function (g, w, h) {
+      if (!cleared) { g.fillStyle = "rgb(" + C.void + ")"; g.fillRect(0, 0, w, h); cleared = true; }
+      g.fillStyle = "rgba(" + C.void + ",0.19)";
+      g.fillRect(0, 0, w, h);
+      var cx = w / 2, cy = h * 0.40, sc = Math.min(w, h) * 0.5 / 2.25;
+      var x1 = cx + sc * Math.sin(z[0]), y1 = cy + sc * Math.cos(z[0]);
+      var x2 = x1 + sc * Math.sin(z[1]), y2 = y1 + sc * Math.cos(z[1]);
+      g.strokeStyle = "rgb(" + C.pendulum + ")";
+      g.lineWidth = 1.7; g.lineCap = "round";
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      g.fillStyle = "rgb(" + C.pendulum + ")";
+      g.beginPath(); g.arc(x1, y1, 2.6, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(x2, y2, 4.0, 0, Math.PI * 2); g.fill();
+    };
+  }
+
+  // Robot — a genuine (smaller) DP solve, then replay of a successful rollout.
+  function RobotSim() {
+    var G = 15, goal = { r: G - 1, c: G - 1 }, start = { r: 0, c: 1 };
+    var obs = null, policy = null, path = [], idx = 0, acc = 0;
+    function solve() {
+      var N = G * G, gi = goal.r * G + goal.c;
+      var Vn = new Float64Array(N), Vc = new Float64Array(N);
+      policy = new Uint8Array(N);
+      function cost(r, c) { var i = r * G + c; return obs[i] ? -1 : (i === gi ? 1 : 0); }
+      for (var t = 90; t >= 1; t--) {
+        for (var r = 0; r < G; r++) for (var c = 0; c < G; c++) {
+          var i = r * G + c;
+          if (obs[i] || i === gi) { Vc[i] = 0; policy[i] = 0; continue; }
+          var bR = -Infinity, bU = -Infinity;
+          for (var pa = 0; pa <= 2; pa++) for (var a = 1; a <= 2; a++) {
+            var ps = (pa === 0 || pa === a) ? 0.8 : 0.6, ev = 0, ir = (a === 1);
+            if (ir) { if (c + 1 < G) { var w1 = cost(r, c + 1); ev += ps * (w1 === 0 ? w1 + Vn[r * G + c + 1] : w1); } else ev += ps * -1; }
+            else { if (r + 1 < G) { var w2 = cost(r + 1, c); ev += ps * (w2 === 0 ? w2 + Vn[(r + 1) * G + c] : w2); } else ev += ps * -1; }
+            if (ir) { if (r + 1 < G) { var w3 = cost(r + 1, c); ev += (1 - ps) * (w3 === 0 ? w3 + Vn[(r + 1) * G + c] : w3); } else ev += (1 - ps) * -1; }
+            else { if (c + 1 < G) { var w4 = cost(r, c + 1); ev += (1 - ps) * (w4 === 0 ? w4 + Vn[r * G + c + 1] : w4); } else ev += (1 - ps) * -1; }
+            if (a === 1) { if (ev > bR) bR = ev; } else { if (ev > bU) bU = ev; }
+          }
+          if (bR >= bU) { Vc[i] = bR; policy[i] = 1; } else { Vc[i] = bU; policy[i] = 2; }
+        }
+        Vn.set(Vc);
+      }
+    }
+    function rollout() {
+      var r = start.r, c = start.c, la = 0, p = [], steps = 0;
+      while (steps++ < G * 3) {
+        var a = policy[r * G + c];
+        if (!a) return { ok: false, path: p };
+        var ps = (la === 0 || la === a) ? 0.8 : 0.6;
+        var goRight = (Math.random() < ps) ? (a === 1) : (a !== 1);
+        if (goRight) c++; else r++;
+        if (r >= G || c >= G) return { ok: false, path: p };
+        p.push({ r: r, c: c }); la = a;
+        if (obs[r * G + c]) return { ok: false, path: p };
+        if (r === goal.r && c === goal.c) return { ok: true, path: p };
+      }
+      return { ok: false, path: p };
+    }
+    function fresh() {
+      for (var i = 0; i < 400; i++) { var res = rollout(); if (res.ok) { path = res.path; idx = 0; return; } }
+      path = []; idx = 0;
+    }
+    (function init() {
+      obs = new Uint8Array(G * G);
+      var placed = 0, guard = 0;
+      while (placed < 20 && guard++ < 900) {
+        var r = Math.floor(Math.random() * G), c = Math.floor(Math.random() * G), i = r * G + c;
+        if ((r === start.r && c === start.c) || (r === goal.r && c === goal.c) || obs[i]) continue;
+        obs[i] = 1; placed++;
+      }
+      solve(); fresh();
+    })();
+    this.step = function (dt) {
+      acc += dt;
+      if (acc > 0.075) { acc = 0; idx++; if (idx > path.length + 6) fresh(); }
+    };
+    this.draw = function (g, w, h) {
+      g.fillStyle = "rgb(" + C.void + ")";
+      g.fillRect(0, 0, w, h);
+      var cell = Math.min(w, h) / G * 0.96;
+      var ox = (w - cell * G) / 2, oy = (h - cell * G) / 2;
+      function px(c) { return ox + (c + 0.5) * cell; }
+      function py(r) { return oy + (G - 1 - r + 0.5) * cell; }
+      g.fillStyle = "rgba(" + C.robot + ",0.28)";
+      for (var i = 0; i < obs.length; i++) {
+        if (!obs[i]) continue;
+        var rr = Math.floor(i / G), cc = i % G;
+        g.fillRect(ox + cc * cell + cell * 0.2, oy + (G - 1 - rr) * cell + cell * 0.2, cell * 0.6, cell * 0.6);
+      }
+      g.fillStyle = "rgba(" + C.robot + ",0.9)";
+      g.beginPath(); g.arc(px(goal.c), py(goal.r), cell * 0.4, 0, Math.PI * 2); g.fill();
+      var upto = Math.min(idx, path.length);
+      if (upto > 0) {
+        g.strokeStyle = "rgba(" + C.robot + ",0.55)";
+        g.lineWidth = Math.max(1.1, cell * 0.15);
+        g.lineJoin = g.lineCap = "round";
+        g.beginPath(); g.moveTo(px(start.c), py(start.r));
+        for (var j = 0; j < upto; j++) g.lineTo(px(path[j].c), py(path[j].r));
+        g.stroke();
+        var cur = path[upto - 1];
+        g.fillStyle = "rgb(" + C.robot + ")";
+        g.beginPath(); g.arc(px(cur.c), py(cur.r), cell * 0.32, 0, Math.PI * 2); g.fill();
+      } else {
+        g.fillStyle = "rgb(" + C.robot + ")";
+        g.beginPath(); g.arc(px(start.c), py(start.r), cell * 0.32, 0, Math.PI * 2); g.fill();
+      }
+    };
+  }
+
+  // Queued — a neutral scanning sweep. Deliberately shows no fabricated results.
+  function QueuedSim() {
+    var phase = Math.random();
+    this.step = function (dt) { phase = (phase + dt * 0.24) % 1; };
+    this.draw = function (g, w, h) {
+      g.fillStyle = "rgb(" + C.void + ")";
+      g.fillRect(0, 0, w, h);
+      g.strokeStyle = "rgba(" + C.ink + ",0.045)";
+      g.lineWidth = 1;
+      var step = 13;
+      for (var x = step; x < w; x += step) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+      for (var y = step; y < h; y += step) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+      var sx = phase * w;
+      var gr = g.createLinearGradient(sx - 38, 0, sx, 0);
+      gr.addColorStop(0, "rgba(" + C.dim + ",0)");
+      gr.addColorStop(1, "rgba(" + C.dim + ",0.17)");
+      g.fillStyle = gr;
+      g.fillRect(sx - 38, 0, 38, h);
+      g.strokeStyle = "rgba(" + C.dim + ",0.30)";
+      g.beginPath(); g.moveTo(sx, 0); g.lineTo(sx, h); g.stroke();
+    };
+  }
+
+  function makeSim(kind) {
+    if (kind === "pendulum") return new PendulumSim();
+    if (kind === "robot") return new RobotSim();
+    return new QueuedSim();
+  }
+
+  // ---------------- Build cards ----------------
+  PROJECTS.forEach(function (p, i) {
+    var el = document.createElement("div");
+    el.className = "card";
+    el.tabIndex = 0;
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", p.title + (p.url ? "" : " (not yet published)"));
+
+    var seq = (i < 9 ? "0" : "") + (i + 1);
+    el.innerHTML =
+      '<div class="card-preview"><canvas></canvas></div>' +
+      '<div class="card-head">' +
+        '<span class="card-dot" style="background:' + p.hex + '"></span>' +
+        '<span class="card-title">' + p.title + '</span>' +
+        '<span class="card-seq">' + seq + '</span>' +
+      '</div>' +
+      '<div class="card-body"><div class="card-body-inner">' +
+        '<p class="card-blurb">' + p.blurb + '</p>' +
+        '<div class="card-meta">' + p.meta.map(function (m) { return '<span>' + m + '</span>'; }).join('') + '</div>' +
+        (p.url
+          ? '<a class="card-cta" href="' + p.url + '" style="background:' + p.hex + '">Open full project <span aria-hidden="true">&#8599;</span></a>'
+          : '<span class="card-cta disabled">Not yet published</span>') +
+      '</div></div>';
+
+    stage.appendChild(el);
+
+    p.el = el;
+    p.canvas = el.querySelector(".card-preview canvas");
+    p.cctx = p.canvas.getContext("2d");
+    p.simObj = makeSim(p.sim);
+    p.cardTitleEl = el.querySelector(".card-title");
+    p.cardTitleEl.style.color = p.kind === "Live" ? p.hex : "var(--dim)";
+    p.sized = false;
+    p.visible = true;
+
+    el.addEventListener("click", function (ev) {
+      var cta = ev.target.closest(".card-cta");
+      if (cta) {
+        // Plain left-click hands off with a fade; modified clicks (new tab,
+        // middle-click) are left entirely to the browser.
+        if (p.url && !reduced && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
+          ev.preventDefault();
+          document.body.classList.add("leaving");
+          setTimeout(function () { location.href = p.url; }, 260);
+        }
+        return;
+      }
+      if (didDrag) return;
+      ev.stopPropagation();
+      if (selected === p) clearSelection(); else selectProject(p);
+    });
+    el.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        if (selected === p) clearSelection(); else selectProject(p);
+      }
+    });
+  });
+
+  function sizeCardCanvas(p) {
+    var w = p.canvas.clientWidth, h = p.canvas.clientHeight;
+    if (!w || !h) return false;
+    var dpr = window.devicePixelRatio || 1;
+    p.canvas.width = Math.round(w * dpr);
+    p.canvas.height = Math.round(h * dpr);
+    p.cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    p.cw = w; p.ch = h;
+    return true;
+  }
+
+  // ---------------- Selection ----------------
+  var hint = document.getElementById("stage-hint");
+  var scrim = document.getElementById("scrim");
+
+  // Solve for the yaw/pitch that bring this node to (0,0,1) — dead centre,
+  // facing the viewer. Sign matters: negating yaw sends it to the far side.
+  function faceNode(p) {
+    var ty = Math.atan2(p.pos.x, p.pos.z);
+    var tp = Math.asin(Math.max(-1, Math.min(1, p.pos.y)));
+    while (ty - yaw > Math.PI) ty -= Math.PI * 2;
+    while (ty - yaw < -Math.PI) ty += Math.PI * 2;
+    focusYaw = ty; focusPitch = tp;
+  }
+
+  // Zoom flight. Card transforms are rewritten every rAF frame, so a CSS
+  // transition on transform would just be overwritten — the tween lives here.
+  var IDLE_W = 168, OPEN_W = 328;
+  var zoom = { active: false, t: 0, dur: 0.5, fromX: 0, fromY: 0, fromScale: 1 };
+
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function selectProject(p) {
+    var already = selected === p;
+    selected = p;
+    faceNode(p);
+
+    if (!already) {
+      // Start the flight from exactly where the small card was sitting. The card
+      // snaps to its open width immediately, so the starting scale is shrunk by
+      // the width ratio — otherwise it slides in at full size instead of growing.
+      var startScale = (p._depthScale || 1) * (IDLE_W / OPEN_W);
+      zoom.active = !reduced;
+      zoom.t = 0;
+      zoom.fromX = (p._sx !== undefined) ? p._sx : W / 2;
+      zoom.fromY = (p._sy !== undefined) ? p._sy : H / 2;
+      zoom.fromScale = startScale;
+    }
+
+    PROJECTS.forEach(function (q) {
+      q.el.classList.toggle("selected", q === p);
+      q.el.classList.toggle("dimmed", q !== p);
+    });
+    scrim.classList.add("on");
+    // a selected card must re-measure: its canvas got wider
+    p.sized = false;
+    hint.classList.add("hushed");
+    syncIndex();
+  }
+
+  function clearSelection() {
+    if (!selected) return;
+    var prev = selected;
+    selected = null;
+    zoom.active = false;
+    PROJECTS.forEach(function (q) { q.el.classList.remove("selected", "dimmed"); });
+    scrim.classList.remove("on");
+    prev.sized = false;
+    focusYaw = focusPitch = null;
+    hint.classList.remove("hushed");
+    syncIndex();
+  }
+
+  // ---------------- Drag ----------------
+  var dragging = false, didDrag = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
+
+  stage.addEventListener("pointerdown", function (e) {
+    dragging = true; didDrag = false;
+    lastX = downX = e.clientX; lastY = downY = e.clientY;
+    stage.classList.add("dragging");
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var dx = e.clientX - lastX, dy = e.clientY - lastY;
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 5) didDrag = true;
+    // Yaw is negated so the sphere follows the pointer: increasing yaw carries a
+    // front-facing point to the LEFT, so dragging right must decrease it.
+    // Pitch already tracks correctly and is left alone.
+    yaw -= dx * 0.0060; pitch += dy * 0.0048;
+    pitch = Math.max(-1.1, Math.min(1.1, pitch));
+    vYaw = -dx * 0.0060; vPitch = dy * 0.0048;
+    lastX = e.clientX; lastY = e.clientY;
+    if (didDrag) focusYaw = focusPitch = null;
+  });
+  window.addEventListener("pointerup", function (e) {
+    if (!dragging) return;
+    dragging = false;
+    stage.classList.remove("dragging");
+    if (!didDrag && e.target === canvas) clearSelection();
+    // let the click handler read didDrag, then reset next tick
+    setTimeout(function () { didDrag = false; }, 0);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") clearSelection();
+  });
+
+  // ---------------- Index ----------------
+  var indexList = document.getElementById("index-list");
+  PROJECTS.forEach(function (p, i) {
+    var li = document.createElement("li");
+    var a = document.createElement("a");
+    a.href = p.url || "#";
+    a.dataset.id = p.id;
+    a.innerHTML =
+      '<span class="idx">' + (i < 9 ? "0" : "") + (i + 1) + '</span>' +
+      '<span class="dot" style="background:' + p.hex + '"></span>' +
+      '<span>' + p.title + '</span>';
+    a.addEventListener("focus", function () { selectProject(p); });
+    a.addEventListener("click", function (ev) {
+      if (!p.url) { ev.preventDefault(); selectProject(p); return; }
+      // Published projects are real links; fade out first on a plain left-click.
+      if (!reduced && !ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.button === 0) {
+        ev.preventDefault();
+        document.body.classList.add("leaving");
+        setTimeout(function () { location.href = p.url; }, 260);
+      }
+    });
+    li.appendChild(a);
+    indexList.appendChild(li);
+  });
+
+  function syncIndex() {
+    var links = indexList.querySelectorAll("a");
+    for (var i = 0; i < links.length; i++) {
+      links[i].classList.toggle("active", !!selected && links[i].dataset.id === selected.id);
+    }
+  }
+
+  document.getElementById("status-count").textContent =
+    PROJECTS.filter(function (p) { return p.kind === "Live"; }).length + " projects live";
+  document.getElementById("status-sub").textContent =
+    PROJECTS.filter(function (p) { return p.kind !== "Live"; }).length + " queued";
+
+  // ---------------- Card layout + main loop ----------------
+  function layoutCards() {
+    for (var i = 0; i < PROJECTS.length; i++) {
+      var p = PROJECTS[i];
+      var rp = rot(p.pos, yaw, pitch);
+      var s = project(rp);
+      p._z = rp.z; p._sx = s.x; p._sy = s.y; p._f = s.f;
+
+      var isSel = selected === p;
+      // Only clearly front-facing cards are shown — the far side of the sphere
+      // stays clear, which keeps 7 cards from piling into noise.
+      var show = isSel || rp.z > 0.06;
+
+      if (!show) {
+        if (p.visible) { p.el.classList.add("hidden"); p.visible = false; }
+        continue;
+      }
+      if (!p.visible) { p.el.classList.remove("hidden"); p.visible = true; p.sized = false; }
+
+      var depthScale = 0.74 + 0.26 * rp.z;
+      p._depthScale = depthScale;
+
+      // Unselected cards recede a little as they dim, pushing the selected one
+      // forward in the depth stack.
+      var scale = isSel ? 1 : (selected ? depthScale * 0.9 : depthScale);
+      var opacity = isSel ? 1 : (selected ? 0.12 : Math.max(0, Math.min(1, (rp.z - 0.06) / 0.14)));
+
+      // The selected card is pinned to the centre of the stage rather than
+      // tracking its node, so it is readable and un-clipped the instant it
+      // opens — the sphere still rotates behind it to bring that node forward.
+      var px = isSel ? W / 2 : p._sx;
+      var py = isSel ? H / 2 : p._sy;
+
+      // ...but on the way in it flies from where the small card was, growing
+      // into place, so selecting reads as a zoom rather than a jump.
+      if (isSel && zoom.active) {
+        var e = easeOutCubic(Math.min(1, zoom.t / zoom.dur));
+        px = zoom.fromX + (px - zoom.fromX) * e;
+        py = zoom.fromY + (py - zoom.fromY) * e;
+        scale = zoom.fromScale + (1 - zoom.fromScale) * e;
+      }
+
+      p.el.style.transform =
+        "translate3d(" + Math.round(px) + "px," + Math.round(py) + "px,0) " +
+        "translate(-50%,-50%) scale(" + scale.toFixed(3) + ")";
+      p.el.style.opacity = opacity.toFixed(3);
+      p.el.style.zIndex = String(100 + Math.round(rp.z * 100));
+    }
+  }
+
+  var lastTs = 0;
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0.016;
+    lastTs = ts;
+
+    if (zoom.active) {
+      zoom.t += dt;
+      if (zoom.t >= zoom.dur) { zoom.t = zoom.dur; zoom.active = false; }
+    }
+
+    if (focusYaw !== null) {
+      // Frame-rate independent ease, and it must not stop until BOTH axes have
+      // arrived — releasing on yaw alone strands the node off-centre vertically.
+      var k = Math.min(1, dt * 7);
+      yaw += (focusYaw - yaw) * k;
+      pitch += (focusPitch - pitch) * k;
+      if (Math.abs(focusYaw - yaw) < 0.0015 && Math.abs(focusPitch - pitch) < 0.0015) {
+        yaw = focusYaw; pitch = focusPitch;
+        focusYaw = focusPitch = null;
+      }
+    } else if (!dragging) {
+      yaw += vYaw + (selected ? 0 : spin);
+      pitch += vPitch;
+      vYaw *= 0.93; vPitch *= 0.93;
+      if (Math.abs(vYaw) < 1e-5) vYaw = 0;
+      if (Math.abs(vPitch) < 1e-5) vPitch = 0;
+      pitch = Math.max(-1.1, Math.min(1.1, pitch));
+    }
+
+    layoutCards();
+    drawGlobe();
+
+    // Only visible cards consume simulation time.
+    for (var i = 0; i < PROJECTS.length; i++) {
+      var p = PROJECTS[i];
+      if (!p.visible) continue;
+      if (!p.sized && !sizeCardCanvas(p)) continue;
+      p.sized = true;
+      p.simObj.step(dt);
+      p.simObj.draw(p.cctx, p.cw, p.ch);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", function () {
+    sizeGlobe();
+    PROJECTS.forEach(function (p) { p.sized = false; });
+  });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "yellow" — a warm gold family,
+    varied only by lightness/saturation, matching the same system used
+    for the double-pendulum piece (which was green). Committed to one
+    dark world on purpose (no light-mode variant).
+  */
+  :root {
+    --bg: #120e04;
+    --surface: #1c1608;
+    --surface-2: #241d0c;
+    --ink: #f7f1de;
+    --ink-dim: #a89b74;
+    --line: rgba(230,215,170,0.13);
+
+    --y-bright: #ffcf3f;               /* the agent / the policy in motion */
+    --y-bright-soft: rgba(255,207,63,0.14);
+    --y-deep: #7a5710;                 /* obstacles */
+    --y-deep-soft: rgba(122,87,16,0.22);
+    --y-mid: #d9a72c;                  /* success rate / synthesis */
+    --y-pale: #f5e6a3;                 /* the goal, and the headline numbers */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--y-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--y-pale); font-weight: 600; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.rate .value { color: var(--y-mid); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.agent { background: var(--y-bright); }
+  .swatch.obstacle { background: var(--y-deep); }
+  .swatch.goal { background: var(--y-pale); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--y-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--y-pale); outline-offset: 2px; }
+  button.primary { background: var(--y-bright); border-color: var(--y-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--y-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--y-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--y-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--y-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-actions { margin-top: 30px; display: flex; gap: 10px; }
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Solution figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; aspect-ratio: 1 / 1; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--y-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--y-mid); }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--y-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--y-pale); outline-offset: 3px; }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Stochastic Optimal Control &middot; Dynamic Programming</p>
+      <h1>Robot Navigation</h1>
+      <p class="dek">Every move has a real chance of sliding sideways instead of going where it's pointed &mdash; <strong>80%</strong> of the time if it's continuing straight, only <strong>60%</strong> if it just changed direction. Solving for the best strategy anyway means solving a small optimization problem at all 1,681 grid cells, propagated backward through time until the answer stops changing.</p>
+      <div class="metrics-row">
+        <div class="metric rate">
+          <span class="label">Success rate</span>
+          <span class="value" id="readout-rate">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch agent"></i>Agent</span>
+          <span><i class="swatch obstacle"></i>Obstacle</span>
+          <span><i class="swatch goal"></i>Goal</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-reset" type="button">Restart</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Transition probabilities</h2>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-psame"><span>p(continue straight)</span><span class="val" id="val-psame">0.80</span></label>
+        <input type="range" id="slider-psame" min="0.5" max="0.95" step="0.01" value="0.8">
+      </div>
+      <div class="field">
+        <label for="slider-pchange"><span>p(after changing direction)</span><span class="val" id="val-pchange">0.60</span></label>
+        <input type="range" id="slider-pchange" min="0.2" max="0.9" step="0.01" value="0.6">
+      </div>
+    </div>
+    <div class="panel-actions">
+      <button id="btn-shuffle" type="button">Shuffle obstacles</button>
+    </div>
+    <p class="panel-note">Changing either slider re-solves the full backward-induction recursion &mdash; 41&times;41 states, up to 200 steps &mdash; from scratch.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>The computed solution</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="heatmap" width="440" height="440"></canvas>
+        <figcaption><span>Value function</span><span>expected return from each cell</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="quiver" width="440" height="440"></canvas>
+        <figcaption><span>Optimal policy</span><span>best action per cell</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>Why the best move depends on your last one</h2>
+    <div class="essay-body">
+      <p class="lede">Point-and-click path planning assumes the robot goes where it's told. Here it doesn't &mdash; every step has a real chance of sliding into the other direction instead, and that chance depends on whether the robot is continuing straight or just changed its mind. Planning around that isn't optional; it's the entire problem.</p>
+
+      <p>The grid is 41&times;41. The robot can only move right or up. At every cell, the question is: given where I am, and given what I just did, which action has the higher expected value from here to the goal? That's a backward-induction problem &mdash; start at the goal, work backward one time step at a time, and let each step's answer lean on the next step's already-solved answer:</p>
+
+      <div class="eq-block">V_t(s) = max<span class="dim">[a &isin; {&rarr;, &uarr;}]</span>  p(a) &middot; [r(s_a) + V_<span class="dim">t+1</span>(s_a)]  +  (1&minus;p(a)) &middot; [r(s_a&#772;) + V_<span class="dim">t+1</span>(s_a&#772;)]
+
+<span class="dim">p(a) = 0.80  if a matches the previous move   (momentum)</span>
+<span class="dim">p(a) = 0.60  if a is a direction change      (the slip)</span>
+
+<span class="dim">s_a  = the cell reached if the intended action succeeds</span>
+<span class="dim">s_a&#772; = the cell reached if it slips into the other action instead</span></div>
+
+      <p class="pull">This is the twist that makes it interesting: the transition probabilities aren't fixed, they depend on momentum. The recursion above has to loop over three possible "what did I just do" states for every cell before it can even ask which action is best &mdash; the policy at 80%/60% looks nothing like the policy you'd get by ignoring momentum entirely.</p>
+
+      <p>The live counters above aren't decoration &mdash; they're the same Monte Carlo verification from the original coursework, just running continuously instead of stopping at 1,000 trials, tallying every attempt in the background: obstacles hit, boundaries run off, goals reached. The route drawn on screen is always one of the successful ones &mdash; a real sampled run, just filtered so what you're watching never wanders off and dead-ends. The success-rate counter is where the failures still show up, honestly.</p>
+
+      <p>It's a different flavor of the same instinct running through the rest of this collection: don't just derive an answer &mdash; watch it survive contact with the randomness it promised to handle. Here that's a Bellman recursion instead of a &mu;-analysis, but the discipline is identical: solve exactly, then stress-test relentlessly.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from graduate coursework in optimal control (stochastic shortest-path via dynamic programming). Solved here in-browser with the same backward-induction recursion &mdash; recomputed live, in place, whenever the transition probabilities change.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------- Theme (single dark yellow world, no light variant) ----------------
+  var T = {
+    bg: "18,14,4",
+    bright: "255,207,63",
+    deep: "122,87,16",
+    mid: "217,167,44",
+    pale: "245,230,163",
+    ink: "247,241,222",
+    line: "230,215,170"
+  };
+
+  var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- Grid / DP setup ----------------
+  var GRID = 41;
+  var START = { r: 0, c: 4 };
+  var GOAL = { r: GRID - 1, c: GRID - 1 };
+  var T_MAX = 200;
+  var MAX_SIM_STEPS = 3 * GRID;
+  var OBSTACLE_COUNT = 150;
+  var RIGHT = 1, UP = 2;
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function generateObstacles(rand) {
+    var flags = new Uint8Array(GRID * GRID);
+    var placed = 0, attempts = 0;
+    while (placed < OBSTACLE_COUNT && attempts < OBSTACLE_COUNT * 30) {
+      attempts++;
+      var r = Math.floor(rand() * GRID), c = Math.floor(rand() * GRID);
+      if ((r === START.r && c === START.c) || (r === GOAL.r && c === GOAL.c)) continue;
+      var idx = r * GRID + c;
+      if (flags[idx]) continue;
+      flags[idx] = 1;
+      placed++;
+    }
+    return flags;
+  }
+
+  function computeSolution(obstacleFlags, pSame, pChange) {
+    var N = GRID * GRID;
+    var Vnext = new Float64Array(N);
+    var Vcurr = new Float64Array(N);
+    var policy = new Uint8Array(N);
+    var goalIdx = GOAL.r * GRID + GOAL.c;
+
+    function cost(r, c) {
+      var idx = r * GRID + c;
+      if (obstacleFlags[idx]) return -1;
+      if (idx === goalIdx) return 1;
+      return 0;
+    }
+
+    for (var t = T_MAX; t >= 1; t--) {
+      for (var r = 0; r < GRID; r++) {
+        for (var c = 0; c < GRID; c++) {
+          var idx = r * GRID + c;
+          if (obstacleFlags[idx] || idx === goalIdx) { Vcurr[idx] = 0; policy[idx] = 0; continue; }
+
+          var bestRight = -Infinity, bestUp = -Infinity;
+          for (var prev = 0; prev <= 2; prev++) {
+            for (var a = 1; a <= 2; a++) {
+              var pSuccess = (prev === 0 || prev === a) ? pSame : pChange;
+              var ev = 0;
+              var intendedRight = (a === RIGHT);
+
+              // intended outcome
+              if (intendedRight) {
+                if (c + 1 < GRID) {
+                  var rw = cost(r, c + 1);
+                  ev += pSuccess * (rw === 0 ? (rw + Vnext[r * GRID + (c + 1)]) : rw);
+                } else { ev += pSuccess * -1; }
+              } else {
+                if (r + 1 < GRID) {
+                  var rw2 = cost(r + 1, c);
+                  ev += pSuccess * (rw2 === 0 ? (rw2 + Vnext[(r + 1) * GRID + c]) : rw2);
+                } else { ev += pSuccess * -1; }
+              }
+              // slip outcome (the other action)
+              if (intendedRight) {
+                if (r + 1 < GRID) {
+                  var rw3 = cost(r + 1, c);
+                  ev += (1 - pSuccess) * (rw3 === 0 ? (rw3 + Vnext[(r + 1) * GRID + c]) : rw3);
+                } else { ev += (1 - pSuccess) * -1; }
+              } else {
+                if (c + 1 < GRID) {
+                  var rw4 = cost(r, c + 1);
+                  ev += (1 - pSuccess) * (rw4 === 0 ? (rw4 + Vnext[r * GRID + (c + 1)]) : rw4);
+                } else { ev += (1 - pSuccess) * -1; }
+              }
+
+              if (a === RIGHT) { if (ev > bestRight) bestRight = ev; }
+              else { if (ev > bestUp) bestUp = ev; }
+            }
+          }
+
+          if (bestRight >= bestUp) { Vcurr[idx] = bestRight; policy[idx] = RIGHT; }
+          else { Vcurr[idx] = bestUp; policy[idx] = UP; }
+        }
+      }
+      var maxDiff = 0;
+      for (var k = 0; k < N; k++) { var d = Math.abs(Vcurr[k] - Vnext[k]); if (d > maxDiff) maxDiff = d; }
+      Vnext.set(Vcurr);
+      if (t < T_MAX && maxDiff < 1e-6) break;
+    }
+    return { policy: policy, value: Vnext };
+  }
+
+  // ---------------- Live state ----------------
+  var obstacleFlags = generateObstacles(mulberry32(42));
+  var pSame = 0.8, pChange = 0.6;
+  var solution = computeSolution(obstacleFlags, pSame, pChange);
+
+  // A single simulated run of the current policy, start to termination.
+  // Used two ways: (1) found-and-replayed for the on-screen animation, which
+  // only ever shows a run that actually reaches the goal, and (2) run silently
+  // in bulk to keep the Runs / Success rate counters honest about every
+  // attempt, successes and failures alike.
+  function simulateEpisode() {
+    var r = START.r, c = START.c, lastAction = 0, steps = 0;
+    var path = [];
+    while (true) {
+      var idx = r * GRID + c;
+      var action = solution.policy[idx];
+      if (!action) return { success: false, path: path };
+      var pSuccess = (lastAction === 0 || lastAction === action) ? pSame : pChange;
+      var intendedRight = action === RIGHT;
+      var succeeded = Math.random() < pSuccess;
+      var movesRight = succeeded ? intendedRight : !intendedRight;
+      var nr = r, nc = c;
+      if (movesRight) nc += 1; else nr += 1;
+      steps++;
+      if (nr >= GRID || nc >= GRID) return { success: false, path: path };
+      r = nr; c = nc; lastAction = action;
+      path.push({ r: r, c: c });
+      if (obstacleFlags[r * GRID + c]) return { success: false, path: path };
+      if (r === GOAL.r && c === GOAL.c) return { success: true, path: path };
+      if (steps >= MAX_SIM_STEPS) return { success: false, path: path };
+    }
+  }
+
+  function findSuccessfulPath() {
+    var last = null;
+    for (var attempts = 0; attempts < 500; attempts++) {
+      last = simulateEpisode();
+      if (last.success) return last.path;
+    }
+    return last ? last.path : []; // pathological fallback, practically never hit
+  }
+
+  var agent = { r: START.r, c: START.c, prevR: START.r, prevC: START.c, animStart: 0 };
+  var trail = [];
+  var displayPath = findSuccessfulPath();
+  var displayIndex = 0;
+  var runs = 0, successes = 0;
+  var playing = !reducedMotion;
+  var nowTs = 0, nextStepAt = 0, statsNextAt = 0;
+  var STEP_MS = 110, ANIM_MS = 95, PAUSE_MS = 350, STATS_INTERVAL_MS = 150;
+
+  var sliderPSame = document.getElementById("slider-psame");
+  var sliderPChange = document.getElementById("slider-pchange");
+  var valPSame = document.getElementById("val-psame");
+  var valPChange = document.getElementById("val-pchange");
+  var readoutRate = document.getElementById("readout-rate");
+  var btnPlay = document.getElementById("btn-play");
+  var btnReset = document.getElementById("btn-reset");
+  var btnShuffle = document.getElementById("btn-shuffle");
+
+  function updateStatsDom() {
+    readoutRate.textContent = runs === 0 ? "—" : Math.round((successes / runs) * 100) + "%";
+  }
+
+  function resetEpisode(clearStats) {
+    agent.r = START.r; agent.c = START.c; agent.prevR = START.r; agent.prevC = START.c;
+    agent.animStart = nowTs;
+    trail = []; displayIndex = 0;
+    if (clearStats) { runs = 0; successes = 0; }
+    nextStepAt = nowTs;
+    updateStatsDom();
+  }
+
+  function recompute() {
+    solution = computeSolution(obstacleFlags, pSame, pChange);
+    renderHeatmap();
+    renderQuiver();
+    displayPath = findSuccessfulPath();
+    resetEpisode(true);
+  }
+
+  function syncSliderLabels() {
+    valPSame.textContent = pSame.toFixed(2);
+    valPChange.textContent = pChange.toFixed(2);
+  }
+
+  sliderPSame.addEventListener("input", function () { pSame = parseFloat(sliderPSame.value); syncSliderLabels(); });
+  sliderPSame.addEventListener("change", recompute);
+  sliderPChange.addEventListener("input", function () { pChange = parseFloat(sliderPChange.value); syncSliderLabels(); });
+  sliderPChange.addEventListener("change", recompute);
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnReset.addEventListener("click", function () {
+    displayPath = findSuccessfulPath();
+    resetEpisode(true);
+  });
+  btnShuffle.addEventListener("click", function () {
+    obstacleFlags = generateObstacles(Math.random);
+    recompute();
+  });
+
+  // Advances the on-screen agent one step along the precomputed successful
+  // path. This is playback of a real (randomly sampled) successful run, not
+  // a scripted one — it's just filtered so what's animated never fails.
+  function advanceDisplay() {
+    if (displayIndex >= displayPath.length) {
+      nextStepAt = nowTs + PAUSE_MS;
+      displayPath = findSuccessfulPath();
+      displayIndex = 0;
+      agent.r = START.r; agent.c = START.c; agent.prevR = START.r; agent.prevC = START.c;
+      agent.animStart = nowTs + PAUSE_MS;
+      trail = [];
+      updateStatsDom();
+      return;
+    }
+    var step = displayPath[displayIndex];
+    agent.prevR = agent.r; agent.prevC = agent.c; agent.animStart = nowTs;
+    agent.r = step.r; agent.c = step.c;
+    trail.push({ r: step.r, c: step.c });
+    displayIndex++;
+  }
+
+  // Runs full episodes silently in the background — including the ones that
+  // hit an obstacle or run off the grid — purely to keep Runs / Success rate
+  // an honest reflection of the policy's real performance.
+  function tickStats(ts) {
+    if (ts < statsNextAt) return;
+    var result = simulateEpisode();
+    runs++; if (result.success) successes++;
+    updateStatsDom();
+    statsNextAt = ts + STATS_INTERVAL_MS;
+  }
+
+  // ---------------- Stage canvas ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+
+  function sizeStage() {
+    var cssSize = stageHolder.clientWidth;
+    var dpr = window.devicePixelRatio || 1;
+    stageCanvas.width = Math.round(cssSize * dpr);
+    stageCanvas.height = Math.round(cssSize * dpr);
+    stageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function cellX(c, w) { return (c + 0.5) * (w / GRID); }
+  function cellY(r, h) { return (GRID - 1 - r + 0.5) * (h / GRID); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function easeOut(t) { return 1 - (1 - t) * (1 - t); }
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight || w;
+    var cell = w / GRID;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0, 0, w, h);
+
+    // obstacles
+    stageCtx.fillStyle = "rgb(" + T.deep + ")";
+    var pad = cell * 0.14;
+    for (var r = 0; r < GRID; r++) {
+      for (var c = 0; c < GRID; c++) {
+        if (obstacleFlags[r * GRID + c]) {
+          var x = c * cell, y = (GRID - 1 - r) * cell;
+          stageCtx.fillRect(x + pad, y + pad, cell - 2 * pad, cell - 2 * pad);
+        }
+      }
+    }
+
+    // start marker
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.7)";
+    stageCtx.lineWidth = 1.5;
+    stageCtx.beginPath();
+    stageCtx.arc(cellX(START.c, w), cellY(START.r, h), cell * 0.32, 0, Math.PI * 2);
+    stageCtx.stroke();
+
+    // goal marker with soft glow
+    var gx = cellX(GOAL.c, w), gy = cellY(GOAL.r, h);
+    var glow = stageCtx.createRadialGradient(gx, gy, 0, gx, gy, cell * 2.2);
+    glow.addColorStop(0, "rgba(" + T.pale + ",0.35)");
+    glow.addColorStop(1, "rgba(" + T.pale + ",0)");
+    stageCtx.fillStyle = glow;
+    stageCtx.fillRect(gx - cell * 2.2, gy - cell * 2.2, cell * 4.4, cell * 4.4);
+    stageCtx.fillStyle = "rgb(" + T.pale + ")";
+    stageCtx.beginPath();
+    stageCtx.arc(gx, gy, cell * 0.4, 0, Math.PI * 2);
+    stageCtx.fill();
+
+    // full route for this run, start to current position (kept for the whole episode)
+    if (trail.length > 0) {
+      stageCtx.strokeStyle = "rgba(" + T.bright + ",0.4)";
+      stageCtx.lineWidth = Math.max(1.5, cell * 0.09);
+      stageCtx.lineCap = "round";
+      stageCtx.lineJoin = "round";
+      stageCtx.beginPath();
+      stageCtx.moveTo(cellX(START.c, w), cellY(START.r, h));
+      for (var i = 0; i < trail.length; i++) stageCtx.lineTo(cellX(trail[i].c, w), cellY(trail[i].r, h));
+      stageCtx.stroke();
+    }
+    for (var j = 0; j < trail.length; j++) {
+      var p = trail[j];
+      stageCtx.fillStyle = "rgba(" + T.bright + ",0.6)";
+      stageCtx.beginPath();
+      stageCtx.arc(cellX(p.c, w), cellY(p.r, h), cell * 0.15, 0, Math.PI * 2);
+      stageCtx.fill();
+    }
+
+    // agent (interpolated)
+    var progress = ANIM_MS > 0 ? Math.min(1, Math.max(0, (nowTs - agent.animStart) / ANIM_MS)) : 1;
+    progress = easeOut(progress);
+    var ax = lerp(cellX(agent.prevC, w), cellX(agent.c, w), progress);
+    var ay = lerp(cellY(agent.prevR, h), cellY(agent.r, h), progress);
+    stageCtx.fillStyle = "rgb(" + T.bright + ")";
+    stageCtx.beginPath();
+    stageCtx.arc(ax, ay, cell * 0.34, 0, Math.PI * 2);
+    stageCtx.fill();
+  }
+
+  // ---------------- Solution figures ----------------
+  var heatmapCanvas = document.getElementById("heatmap"), hCtx = heatmapCanvas.getContext("2d");
+  var quiverCanvas = document.getElementById("quiver"), qCtx = quiverCanvas.getContext("2d");
+
+  function mixColor(lo, hi, t) {
+    return "rgb(" + Math.round(lerp(lo[0], hi[0], t)) + "," + Math.round(lerp(lo[1], hi[1], t)) + "," + Math.round(lerp(lo[2], hi[2], t)) + ")";
+  }
+
+  function renderHeatmap() {
+    var w = heatmapCanvas.width, h = heatmapCanvas.height, cell = w / GRID;
+    var value = solution.value;
+    var min = Infinity, max = -Infinity;
+    for (var i = 0; i < value.length; i++) {
+      if (obstacleFlags[i] || i === GOAL.r * GRID + GOAL.c) continue;
+      if (value[i] < min) min = value[i];
+      if (value[i] > max) max = value[i];
+    }
+    if (!isFinite(min) || !isFinite(max) || max === min) { min = 0; max = 1; }
+
+    var lo = [28, 22, 8], hi = [245, 230, 163];
+    for (var r = 0; r < GRID; r++) {
+      for (var c = 0; c < GRID; c++) {
+        var idx = r * GRID + c;
+        var x = c * cell, y = (GRID - 1 - r) * cell;
+        if (obstacleFlags[idx]) { hCtx.fillStyle = "rgb(" + T.deep + ")"; }
+        else if (idx === GOAL.r * GRID + GOAL.c) { hCtx.fillStyle = "rgb(" + T.pale + ")"; }
+        else {
+          var t = (value[idx] - min) / (max - min);
+          hCtx.fillStyle = mixColor(lo, hi, t);
+        }
+        hCtx.fillRect(x, y, cell + 0.6, cell + 0.6);
+      }
+    }
+  }
+
+  function drawArrow(ctx, x, y, dx, dy, len, color) {
+    var tx = x + dx * len, ty = y + dy * len;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(tx, ty); ctx.stroke();
+    var ah = len * 0.42;
+    var perpX = -dy, perpY = dx;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - dx * ah + perpX * ah * 0.55, ty - dy * ah + perpY * ah * 0.55);
+    ctx.lineTo(tx - dx * ah - perpX * ah * 0.55, ty - dy * ah - perpY * ah * 0.55);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function renderQuiver() {
+    var w = quiverCanvas.width, h = quiverCanvas.height, cell = w / GRID;
+    qCtx.fillStyle = "rgb(" + T.bg + ")";
+    qCtx.fillRect(0, 0, w, h);
+    var stride = 3;
+    var arrowLen = cell * stride * 0.34;
+    for (var r = 0; r < GRID; r += stride) {
+      for (var c = 0; c < GRID; c += stride) {
+        var idx = r * GRID + c;
+        if (obstacleFlags[idx] || idx === GOAL.r * GRID + GOAL.c) continue;
+        var action = solution.policy[idx];
+        if (!action) continue;
+        var x = cellX(c, w), y = cellY(r, h);
+        if (action === RIGHT) drawArrow(qCtx, x, y, 1, 0, arrowLen, "rgb(" + T.bright + ")");
+        else drawArrow(qCtx, x, y, 0, -1, arrowLen, "rgb(" + T.mid + ")");
+      }
+    }
+    // goal + obstacle context
+    for (var i = 0; i < obstacleFlags.length; i++) {
+      if (!obstacleFlags[i]) continue;
+      var rr = Math.floor(i / GRID), cc = i % GRID;
+      qCtx.fillStyle = "rgba(" + T.deep + ",0.55)";
+      qCtx.fillRect(cc * cell, (GRID - 1 - rr) * cell, cell, cell);
+    }
+    qCtx.fillStyle = "rgb(" + T.pale + ")";
+    qCtx.beginPath();
+    qCtx.arc(cellX(GOAL.c, w), cellY(GOAL.r, h), cell * 0.5, 0, Math.PI * 2);
+    qCtx.fill();
+  }
+
+  // ---------------- Animation loop ----------------
+  function frame(ts) {
+    nowTs = ts;
+    if (playing && ts >= nextStepAt) {
+      advanceDisplay();
+      nextStepAt = ts + STEP_MS;
+    }
+    if (playing) tickStats(ts);
+    renderStage();
+    requestAnimationFrame(frame);
+  }
+
+  syncSliderLabels();
+  updateStatsDom();
+  renderHeatmap();
+  renderQuiver();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
