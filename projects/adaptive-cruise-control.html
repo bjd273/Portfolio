@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Cruise Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "blue" — a road/highway-signal blue,
+    varied only by lightness/saturation, matching the green (pendulum) and
+    gold (robot navigation) system. Committed to one dark world on purpose
+    (no light-mode variant).
+  */
+  :root {
+    --bg: #050c14;
+    --surface: #0a1622;
+    --surface-2: #0f2030;
+    --ink: #eaf2f8;
+    --ink-dim: #7f97a8;
+    --line: rgba(190,220,240,0.13);
+
+    --b-bright: #3fa9ff;               /* ego vehicle */
+    --b-bright-soft: rgba(63,169,255,0.14);
+    --b-deep: #1c5a8a;                 /* lead vehicle */
+    --b-deep-soft: rgba(28,90,138,0.18);
+    --b-mid: #5fc2e0;                  /* worst-case sensitivity / synthesis */
+    --b-pale: #b9e6ff;                 /* the uncertainty numbers, the whole point */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--b-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--b-pale); font-weight: 600; }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--b-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--b-pale); outline-offset: 3px; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.err .value { color: var(--b-bright); }
+  .metric.worst .value { color: var(--b-mid); }
+  .metric.samples .value { color: var(--b-pale); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.ego { background: var(--b-bright); }
+  .swatch.lead { background: var(--b-deep); border: 1px solid var(--b-bright-soft); }
+  .swatch.effort { background: radial-gradient(circle, var(--b-pale) 0%, transparent 75%); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--b-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--b-pale); outline-offset: 2px; }
+  button.primary { background: var(--b-bright); border-color: var(--b-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--b-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--b-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--b-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--b-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-actions { margin-top: 30px; display: flex; gap: 10px; }
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Solution figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--b-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--b-mid); }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Robust Control &middot; Vehicle Following</p>
+      <h1>Adaptive Cruise Control</h1>
+      <p class="dek">A PID controller holds a fixed following distance behind the car ahead. But the real car's mass and drag are never exactly known — so the design is proven not against one vehicle, but against every vehicle within <strong>&plusmn;7%</strong> mass and <strong>&plusmn;30%</strong> drag of the nominal.</p>
+      <div class="metrics-row">
+        <div class="metric err">
+          <span class="label">Spacing error</span>
+          <span class="value" id="readout-err">0.00 m</span>
+        </div>
+        <div class="metric worst">
+          <span class="label">Worst |S| found</span>
+          <span class="value" id="readout-worst">&mdash;</span>
+        </div>
+        <div class="metric samples">
+          <span class="label">Samples tested</span>
+          <span class="value" id="readout-samples">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch ego"></i>Ego (controlled)</span>
+          <span><i class="swatch lead"></i>Lead vehicle</span>
+          <span><i class="swatch effort"></i>Control effort (glow)</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-shuffle" type="button">Restart run</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Uncertainty bounds</h2>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-mpct"><span>Mass uncertainty</span><span class="val" id="val-mpct">&plusmn;7%</span></label>
+        <input type="range" id="slider-mpct" min="0" max="30" step="1" value="7">
+      </div>
+      <div class="field">
+        <label for="slider-cpct"><span>Drag uncertainty</span><span class="val" id="val-cpct">&plusmn;30%</span></label>
+        <input type="range" id="slider-cpct" min="0" max="60" step="1" value="30">
+      </div>
+    </div>
+    <div class="panel-actions">
+      <button id="btn-resample" type="button">Resample now</button>
+    </div>
+    <p class="panel-note">Changing either bound re-draws a fresh batch of sampled vehicles and re-solves the closed-loop sensitivity for each.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>Robustness under sampled uncertainty</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="errPlot" width="520" height="360"></canvas>
+        <figcaption><span>Spacing error, e(t)</span><span>nominal vs sampled vehicles</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="sensPlot" width="520" height="360"></canvas>
+        <figcaption><span>|S(j&omega;)|</span><span>nominal vs worst sampled</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>Designing for a car you don't exactly know</h2>
+    <div class="essay-body">
+      <p class="lede">Point a PID controller at "hold 30 meters behind the car ahead" and the design itself is easy. The hard part is that the controller is tuned against a <em>model</em> of the car — a mass, a drag coefficient — and the real vehicle is never exactly that model. Two passengers, a headwind, a half-empty tank: the true mass and drag live somewhere in a range, not at a point.</p>
+
+      <p>The controller is designed the same way you'd place poles on a hand-drawn root locus: pick a desired closed-loop damping &zeta; and natural frequency &omega;<sub>n</sub>, plus a third real pole at &minus;p, then solve directly for the PID gains that put the poles there:</p>
+
+      <div class="eq-block">k_p = m&middot;(2&zeta;&omega;<span class="dim">n</span>p + &omega;<span class="dim">n</span>&sup2;)
+k_i = m&middot;&omega;<span class="dim">n</span>&sup2;&middot;p
+k_d = &minus;c + m&middot;(p + 2&zeta;&omega;<span class="dim">n</span>)
+
+<span class="dim">plant:  m&middot;x&#776; + c&middot;x&#775; = u        (mass&ndash;drag longitudinal dynamics)</span>
+<span class="dim">loop:   L(s) = P(s)K(s),   S(s) = 1 / (1 + L(s))</span></div>
+
+      <p>That design is exact for the nominal mass and drag. The question is what happens to it across the whole uncertainty range — and the honest way to answer that isn't to check one or two extreme cases, it's to sample the range widely and track the worst closed-loop behavior found. The sliders above control how wide that range is; every time they move, a fresh batch of sampled vehicles is drawn and the sensitivity of each is solved exactly, in closed form, from its own mass and drag.</p>
+
+      <p class="pull">The peak of |S(j&omega;)| across frequency is the reciprocal of the stability margin — a controller with a sensitivity peak of 2 can tolerate roughly half as much modeling error as one that peaks at 1. Watching that peak rise as the uncertainty sliders widen is watching the robustness margin shrink in real time.</p>
+
+      <p>The lead-vehicle speed trace driving the road above isn't a stand-in — it's the real recorded data: 250 samples at roughly 10&nbsp;Hz from an actual ACC test drive near Palo Alto, California, pulled directly from the original <code>reftrajdata.mat</code>. One simplification remains, disclosed rather than hidden: the actuator's own dynamic uncertainty, a full frequency-dependent operator in the original design, is reduced here to a random constant gain on the control command.</p>
+
+      <p>What isn't simplified is the search itself. This page does not compute the structured singular value &mu; exactly — that's a real optimization problem, and faking it would be worse than leaving it out. Instead it does exactly what the original analysis's own Monte Carlo section does: draw many plants from the uncertainty set and track the worst one found. More samples tighten the estimate; they never substitute for the exact bound, and the page doesn't claim otherwise.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from graduate coursework in robust control (PID pole placement with structured-uncertainty analysis for vehicle following), driven by the original test drive's real recorded velocity data. Sensitivity is solved in closed form from each sampled plant's exact transfer functions; robustness is characterized by randomized worst-case search, run continuously in-browser.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    bg: "5,12,20",
+    bright: "63,169,255",
+    deep: "28,90,138",
+    mid: "95,194,224",
+    pale: "185,230,255",
+    ink: "234,242,248",
+    line: "190,220,240"
+  };
+
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- Nominal plant + PID design (exact formulas from source) ----------------
+  var m0 = 2065 + 2 * 80;       // kg
+  var c0 = 2 * 0.43 * 20;       // N*s/m
+  var PID_P = 1, PID_ZETA = 0.9, PID_WN = 0.5, TAU = 0.01;
+  var KP = m0 * (2 * PID_ZETA * PID_WN * PID_P + PID_WN * PID_WN);
+  var KI = m0 * PID_WN * PID_WN * PID_P;
+  var KD = -c0 + m0 * (PID_P + 2 * PID_ZETA * PID_WN);
+  var R_DESIRED = 30;            // m
+  var ACTUATOR_UNC = 0.15;       // simplified constant-gain stand-in for Wa/Da (disclosed on page)
+
+  var mPct = 7, cPct = 30;
+
+  // ---------------- Lead-vehicle trace: the real recorded data ----------------
+  // t (s) and vp (m/s) sampled at ~10 Hz from an actual ACC test drive near
+  // Palo Alto, California — extracted from the original reftrajdata.mat and
+  // pulled in directly, not a synthetic stand-in.
+  var REF_T = [0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.799,0.899,0.999,1.099,1.199,1.299,1.399,1.499,1.599,1.699,1.799,1.899,1.999,2.099,2.199,2.298,2.398,2.498,2.598,2.698,2.798,2.898,2.998,3.098,3.198,3.298,3.398,3.498,3.598,3.698,3.798,3.897,3.997,4.097,4.197,4.297,4.397,4.497,4.597,4.697,4.797,4.897,4.997,5.097,5.197,5.297,5.396,5.496,5.596,5.696,5.796,5.896,5.996,6.096,6.196,6.296,6.396,6.496,6.596,6.696,6.796,6.896,6.995,7.095,7.195,7.295,7.395,7.495,7.595,7.695,7.795,7.895,7.995,8.095,8.195,8.295,8.395,8.494,8.594,8.694,8.794,8.894,8.994,9.094,9.194,9.294,9.394,9.494,9.594,9.694,9.794,9.894,9.993,10.093,10.193,10.293,10.393,10.493,10.593,10.693,10.793,10.893,10.993,11.093,11.193,11.293,11.393,11.492,11.592,11.692,11.792,11.892,11.992,12.092,12.192,12.292,12.392,12.492,12.592,12.692,12.792,12.892,12.992,13.091,13.191,13.291,13.391,13.491,13.591,13.691,13.791,13.891,13.991,14.091,14.191,14.291,14.391,14.491,14.59,14.69,14.79,14.89,14.99,15.09,15.19,15.29,15.39,15.49,15.59,15.69,15.79,15.89,15.989,16.089,16.189,16.289,16.389,16.489,16.589,16.689,16.789,16.889,16.989,17.089,17.189,17.289,17.389,17.489,17.588,17.688,17.788,17.888,17.988,18.088,18.188,18.288,18.388,18.488,18.588,18.688,18.788,18.888,18.988,19.087,19.187,19.287,19.387,19.487,19.587,19.687,19.787,19.887,19.987,20.087,20.187,20.287,20.387,20.487,20.586,20.686,20.786,20.886,20.986,21.086,21.186,21.286,21.386,21.486,21.586,21.686,21.786,21.886,21.986,22.085,22.185,22.285,22.385,22.485,22.585,22.685,22.785,22.885,22.985,23.085,23.185,23.285,23.385,23.484,23.584,23.684,23.784,23.884,23.984,24.084,24.184,24.284,24.384,24.484,24.584,24.684,24.784,24.884];
+  var REF_VP = [19.671,19.733,19.791,19.852,19.917,19.989,20.068,20.138,20.192,20.212,20.247,20.276,20.313,20.325,20.348,20.354,20.368,20.38,20.391,20.391,20.417,20.454,20.516,20.581,20.663,20.74,20.822,20.925,21.01,21.077,21.12,21.125,21.127,21.131,21.15,21.154,21.155,21.128,21.102,21.062,21.048,21.047,21.032,21.017,20.997,20.952,20.911,20.867,20.834,20.772,20.688,20.615,20.552,20.539,20.504,20.478,20.473,20.455,20.464,20.463,20.466,20.469,20.455,20.464,20.473,20.511,20.552,20.591,20.635,20.674,20.733,20.799,20.869,20.946,21.036,21.168,21.317,21.492,21.662,21.854,22.056,22.247,22.467,22.626,22.78,22.905,23.08,23.24,23.404,23.585,23.744,23.938,24.11,24.259,24.437,24.601,24.743,24.936,25.064,25.207,25.41,25.491,25.579,25.678,25.755,25.811,25.845,25.884,25.911,25.955,25.971,26.005,26.039,26.063,26.095,26.115,26.132,26.135,26.146,26.154,26.149,26.151,26.148,26.132,26.143,26.143,26.132,26.114,26.123,26.122,26.106,26.102,26.089,26.056,26.034,26.027,25.999,25.969,25.957,25.938,25.919,25.899,25.885,25.849,25.818,25.809,25.8,25.775,25.755,25.723,25.699,25.684,25.667,25.641,25.623,25.622,25.635,25.624,25.595,25.618,25.636,25.638,25.648,25.664,25.673,25.679,25.659,25.657,25.66,25.645,25.639,25.635,25.634,25.626,25.608,25.613,25.613,25.567,25.555,25.541,25.525,25.525,25.514,25.472,25.473,25.435,25.387,25.326,25.256,25.228,25.165,25.141,25.089,25.04,25.04,25.018,25.006,24.98,24.973,24.979,24.976,24.948,24.971,24.959,24.977,24.997,25.011,25.031,25.053,25.08,25.121,25.144,25.161,25.247,25.23,25.223,25.251,25.27,25.288,25.327,25.369,25.425,25.475,25.505,25.539,25.577,25.596,25.605,25.593,25.602,25.598,25.586,25.589,25.603,25.608,25.61,25.593,25.589,25.584,25.551,25.541,25.545,25.525,25.529,25.502,25.468,25.456,25.438,25.426,25.418];
+  var T_FINAL = REF_T[REF_T.length - 1];
+
+  function vLead(t) {
+    var n = REF_T.length;
+    if (t <= REF_T[0]) return REF_VP[0];
+    if (t >= REF_T[n - 1]) return REF_VP[n - 1];
+    for (var i = 0; i < n - 1; i++) {
+      if (t >= REF_T[i] && t <= REF_T[i + 1]) {
+        var span = REF_T[i + 1] - REF_T[i];
+        var frac = span > 0 ? (t - REF_T[i]) / span : 0;
+        return REF_VP[i] + (REF_VP[i + 1] - REF_VP[i]) * frac;
+      }
+    }
+    return REF_VP[n - 1];
+  }
+
+  // ---------------- Closed-loop dynamics ----------------
+  // state z = [xEgoPos, xEgoVel, xi (integral), zFilt (dirty-derivative filter), xLeadPos]
+  function controlCommand(z) {
+    var e = R_DESIRED + z[4] - z[0];
+    return KP * e + KI * z[2] + KD * (e - z[3]) / TAU;
+  }
+  function derivs(z, t, m, c, actGain) {
+    var xEgo = z[0], vEgo = z[1], xi = z[2], zf = z[3], xLead = z[4];
+    var e = R_DESIRED + xLead - xEgo;
+    var u = controlCommand(z) * actGain;
+    var aEgo = (u - c * vEgo) / m;
+    return [vEgo, aEgo, e, (e - zf) / TAU, vLead(t)];
+  }
+  function addScaled(z, k, h) { return [z[0] + h*k[0], z[1] + h*k[1], z[2] + h*k[2], z[3] + h*k[3], z[4] + h*k[4]]; }
+  function rk4(z, t, dt, m, c, actGain) {
+    var k1 = derivs(z, t, m, c, actGain);
+    var k2 = derivs(addScaled(z, k1, dt/2), t + dt/2, m, c, actGain);
+    var k3 = derivs(addScaled(z, k2, dt/2), t + dt/2, m, c, actGain);
+    var k4 = derivs(addScaled(z, k3, dt), t + dt, m, c, actGain);
+    return [
+      z[0] + dt/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]),
+      z[1] + dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1]),
+      z[2] + dt/6*(k1[2]+2*k2[2]+2*k3[2]+k4[2]),
+      z[3] + dt/6*(k1[3]+2*k2[3]+2*k3[3]+k4[3]),
+      z[4] + dt/6*(k1[4]+2*k2[4]+2*k3[4]+k4[4])
+    ];
+  }
+
+  function initState() {
+    var v0 = vLead(0);
+    return [0, v0, 0, 0, 0]; // ego starts at desired spacing implicitly via e definition
+  }
+
+  // Full offline trace of e(t) for one (m,c,actGain) — used for the batch chart, cheap (a few thousand steps).
+  function traceError(m, c, actGain, dt) {
+    var z = initState(), t = 0, out = [];
+    dt = dt || 0.01;
+    while (t < T_FINAL) {
+      out.push({ t: t, e: z[2] !== undefined ? (R_DESIRED + z[4] - z[0]) : 0 });
+      z = rk4(z, t, dt, m, c, actGain);
+      t += dt;
+    }
+    return out;
+  }
+
+  // ---------------- Complex-number sensitivity S(jw), exact ----------------
+  function cx(re, im) { return { re: re, im: im }; }
+  function cadd(a, b) { return cx(a.re + b.re, a.im + b.im); }
+  function cmul(a, b) { return cx(a.re*b.re - a.im*b.im, a.re*b.im + a.im*b.re); }
+  function cdiv(a, b) { var d = b.re*b.re + b.im*b.im; return cx((a.re*b.re + a.im*b.im)/d, (a.im*b.re - a.re*b.im)/d); }
+  function cabs(a) { return Math.sqrt(a.re*a.re + a.im*a.im); }
+
+  function sensitivityAt(w, m, c) {
+    // P(jw) = 1 / (-m w^2 + j c w)
+    var Pden = cx(-m * w * w, c * w);
+    var P = cdiv(cx(1, 0), Pden);
+    // K(jw) = kp + ki/(jw) + kd*(jw)/(tau*jw + 1)
+    var jw = cx(0, w);
+    var kiTerm = cdiv(cx(KI, 0), jw);
+    var kdDen = cadd(cmul(cx(TAU, 0), jw), cx(1, 0));
+    var kdTerm = cdiv(cmul(cx(KD, 0), jw), kdDen);
+    var K = cadd(cadd(cx(KP, 0), kiTerm), kdTerm);
+    var L = cmul(P, K);
+    var S = cdiv(cx(1, 0), cadd(cx(1, 0), L));
+    return cabs(S);
+  }
+
+  var FREQS = (function () {
+    var out = [], n = 60;
+    for (var i = 0; i < n; i++) out.push(Math.pow(10, -2 + (i / (n - 1)) * 4)); // 1e-2 .. 1e2
+    return out;
+  })();
+
+  // ---------------- Live state ----------------
+  var z = initState(), simT = 0;
+  var playing = !reduced;
+  var runs = 0;
+  var worstPeak = null;
+  var batch = []; // [{m,c,actGain,trace,curve,isNominal}]
+
+  var sliderM = document.getElementById("slider-mpct");
+  var sliderC = document.getElementById("slider-cpct");
+  var valM = document.getElementById("val-mpct");
+  var valC = document.getElementById("val-cpct");
+  var readoutErr = document.getElementById("readout-err");
+  var readoutWorst = document.getElementById("readout-worst");
+  var readoutSamples = document.getElementById("readout-samples");
+  var btnPlay = document.getElementById("btn-play");
+  var btnShuffle = document.getElementById("btn-shuffle");
+  var btnResample = document.getElementById("btn-resample");
+
+  function syncLabels() {
+    valM.textContent = "±" + mPct + "%";
+    valC.textContent = "±" + cPct + "%";
+  }
+
+  function sampleParams(rand) {
+    var dm = (rand() * 2 - 1) * (mPct / 100);
+    var dc = (rand() * 2 - 1) * (cPct / 100);
+    var da = (rand() * 2 - 1) * ACTUATOR_UNC;
+    return { m: m0 * (1 + dm), c: c0 * (1 + dc), actGain: 1 + da };
+  }
+
+  function buildBatch() {
+    var rand = Math.random;
+    batch = [];
+    batch.push({ m: m0, c: c0, actGain: 1, isNominal: true });
+    for (var i = 0; i < 5; i++) batch.push(sampleParams(rand));
+    batch.forEach(function (b) {
+      b.trace = traceError(b.m, b.c, b.actGain);
+      b.curve = FREQS.map(function (w) { return sensitivityAt(w, b.m, b.c); });
+      b.peak = Math.max.apply(null, b.curve);
+    });
+    renderErrPlot();
+    renderSensPlot();
+  }
+
+  function resetRun() {
+    z = initState(); simT = 0;
+    updateStatsDom();
+  }
+
+  function updateStatsDom() {
+    var e = R_DESIRED + z[4] - z[0];
+    readoutErr.textContent = e.toFixed(2) + " m";
+    readoutWorst.textContent = worstPeak === null ? "—" : worstPeak.toFixed(2);
+    readoutSamples.textContent = String(runs);
+  }
+
+  sliderM.addEventListener("input", function () { mPct = parseInt(sliderM.value, 10); syncLabels(); });
+  sliderM.addEventListener("change", buildBatch);
+  sliderC.addEventListener("input", function () { cPct = parseInt(sliderC.value, 10); syncLabels(); });
+  sliderC.addEventListener("change", buildBatch);
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnShuffle.addEventListener("click", function () {
+    resetRun();
+    buildBatch();
+  });
+  btnResample.addEventListener("click", buildBatch);
+
+  // ---------------- Stage (road + two vehicles) ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+  var roadOffset = 0;
+
+  function sizeStage() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCanvas.width = Math.round(w * dpr);
+    stageCanvas.height = Math.round(h * dpr);
+    stageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function drawCar(ctx, x, y, w, h, color) {
+    var r = Math.min(8, h * 0.3);
+    ctx.fillStyle = "rgb(" + color + ")";
+    ctx.beginPath();
+    ctx.moveTo(x - w/2 + r, y - h/2);
+    ctx.arcTo(x + w/2, y - h/2, x + w/2, y + h/2, r);
+    ctx.arcTo(x + w/2, y + h/2, x - w/2, y + h/2, r);
+    ctx.arcTo(x - w/2, y + h/2, x - w/2, y - h/2, r);
+    ctx.arcTo(x - w/2, y - h/2, x + w/2, y - h/2, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0, 0, w, h);
+
+    var roadTop = h * 0.42, roadBottom = h * 0.82, roadH = roadBottom - roadTop;
+    stageCtx.fillStyle = "rgba(" + T.line + ",0.05)";
+    stageCtx.fillRect(0, roadTop, w, roadH);
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.4)";
+    stageCtx.lineWidth = 1;
+    stageCtx.beginPath(); stageCtx.moveTo(0, roadTop); stageCtx.lineTo(w, roadTop); stageCtx.stroke();
+    stageCtx.beginPath(); stageCtx.moveTo(0, roadBottom); stageCtx.lineTo(w, roadBottom); stageCtx.stroke();
+
+    var midY = (roadTop + roadBottom) / 2;
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.35)";
+    stageCtx.setLineDash([16, 14]);
+    stageCtx.lineWidth = 2;
+    stageCtx.beginPath();
+    stageCtx.moveTo(-((roadOffset) % 30), midY);
+    stageCtx.lineTo(w, midY);
+    stageCtx.stroke();
+    stageCtx.setLineDash([]);
+
+    // Ego is pinned near the left; the lead car's screen offset is the true
+    // physical gap. Since e = r_desired + xLead - xEgo drives to zero, the
+    // gap that converges to +r_desired is (xEgo - xLead), not (xLead - xEgo) —
+    // getting this backwards puts the lead car on the wrong side of the ego.
+    var pxPerMeter = 6;
+    var egoX = w * 0.22;
+    var desiredLeadX = egoX + R_DESIRED * pxPerMeter;
+    var trueGap = z[0] - z[4];
+    var leadX = Math.max(egoX + 18, Math.min(w - 40, egoX + trueGap * pxPerMeter));
+
+    // desired-spacing marker
+    stageCtx.strokeStyle = "rgba(" + T.pale + ",0.35)";
+    stageCtx.setLineDash([3, 5]);
+    stageCtx.beginPath(); stageCtx.moveTo(desiredLeadX, roadTop + 6); stageCtx.lineTo(desiredLeadX, roadBottom - 6); stageCtx.stroke();
+    stageCtx.setLineDash([]);
+
+    // Ego is camera-anchored, so it never visibly moves — without some other
+    // cue it looks like the lead car is doing all the work. This glow at the
+    // ego's rear makes the PID controller's own effort visible: brighter for
+    // a bigger push, pale when accelerating, mid-tone when braking.
+    var u = controlCommand(z);
+    var mag = Math.min(1, Math.abs(u) / 5000);
+    if (mag > 0.03) {
+      var glowColor = u >= 0 ? T.pale : T.mid;
+      var gx = egoX - 20, gy = midY, gr = 22 + mag * 22;
+      var glow = stageCtx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+      glow.addColorStop(0, "rgba(" + glowColor + "," + (0.6 * mag).toFixed(3) + ")");
+      glow.addColorStop(1, "rgba(" + glowColor + ",0)");
+      stageCtx.fillStyle = glow;
+      stageCtx.beginPath(); stageCtx.arc(gx, gy, gr, 0, Math.PI * 2); stageCtx.fill();
+    }
+
+    drawCar(stageCtx, leadX, midY, 34, 18, T.deep);
+    drawCar(stageCtx, egoX, midY, 34, 18, T.bright);
+
+    roadOffset += z[1] * 0.4;
+  }
+
+  // ---------------- Batch charts ----------------
+  var errCanvas = document.getElementById("errPlot"), errCtx = errCanvas.getContext("2d");
+  var sensCanvas = document.getElementById("sensPlot"), sensCtx = sensCanvas.getContext("2d");
+
+  function axes(ctx, w, h, m) {
+    ctx.strokeStyle = "rgba(" + T.line + ",0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(m, h - m); ctx.lineTo(w - 10, h - m);
+    ctx.moveTo(m, h - m); ctx.lineTo(m, 10);
+    ctx.stroke();
+  }
+
+  function renderErrPlot() {
+    var w = errCanvas.width, h = errCanvas.height, m = 34;
+    errCtx.fillStyle = "rgb(" + T.bg + ")";
+    errCtx.fillRect(0, 0, w, h);
+    axes(errCtx, w, h, m);
+    if (!batch.length) return;
+    var maxE = 1, minE = -1;
+    batch.forEach(function (b) { b.trace.forEach(function (p) { if (p.e > maxE) maxE = p.e; if (p.e < minE) minE = p.e; }); });
+    var pad = (maxE - minE) * 0.1 || 1;
+    maxE += pad; minE -= pad;
+    function mapX(t) { return m + (t / T_FINAL) * (w - m - 10); }
+    function mapY(e) { return (h - m) - (e - minE) / (maxE - minE) * (h - m - 10); }
+    batch.forEach(function (b) {
+      errCtx.strokeStyle = b.isNominal ? "rgb(" + T.bright + ")" : "rgba(" + T.deep + ",0.8)";
+      errCtx.lineWidth = b.isNominal ? 2 : 1.2;
+      errCtx.beginPath();
+      b.trace.forEach(function (p, i) { var x = mapX(p.t), y = mapY(p.e); if (i === 0) errCtx.moveTo(x, y); else errCtx.lineTo(x, y); });
+      errCtx.stroke();
+    });
+  }
+
+  function renderSensPlot() {
+    var w = sensCanvas.width, h = sensCanvas.height, m = 34;
+    sensCtx.fillStyle = "rgb(" + T.bg + ")";
+    sensCtx.fillRect(0, 0, w, h);
+    axes(sensCtx, w, h, m);
+    if (!batch.length) return;
+    var maxMag = 0.5;
+    batch.forEach(function (b) { b.curve.forEach(function (v) { if (v > maxMag) maxMag = v; }); });
+    maxMag *= 1.15;
+    function mapX(i) { return m + (i / (FREQS.length - 1)) * (w - m - 10); }
+    function mapY(v) { return (h - m) - (v / maxMag) * (h - m - 10); }
+    var worst = batch.reduce(function (a, b) { return (b.isNominal || (a && a.peak >= b.peak)) ? a : b; }, null) || batch[0];
+    batch.forEach(function (b) {
+      if (b !== worst && !b.isNominal) return; // keep the chart readable: nominal + worst-of-batch only
+      sensCtx.strokeStyle = b.isNominal ? "rgb(" + T.bright + ")" : "rgb(" + T.mid + ")";
+      sensCtx.lineWidth = b.isNominal ? 2 : 1.6;
+      sensCtx.beginPath();
+      b.curve.forEach(function (v, i) { var x = mapX(i), y = mapY(v); if (i === 0) sensCtx.moveTo(x, y); else sensCtx.lineTo(x, y); });
+      sensCtx.stroke();
+    });
+  }
+
+  // ---------------- Background worst-case ticker (cheap: peak only, no full trace) ----------------
+  var statsNextAt = 0, STATS_INTERVAL_MS = 130;
+  function tickStats(ts) {
+    if (ts < statsNextAt) return;
+    var p = sampleParams(Math.random);
+    var peak = 0;
+    for (var i = 0; i < FREQS.length; i++) { var v = sensitivityAt(FREQS[i], p.m, p.c); if (v > peak) peak = v; }
+    runs++;
+    if (worstPeak === null || peak > worstPeak) worstPeak = peak;
+    statsNextAt = ts + STATS_INTERVAL_MS;
+  }
+
+  // ---------------- Main loop ----------------
+  var SIM_SPEED = 2.2; // data-seconds per real second
+  var nextResetAt = 0, lastTs = 0;
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0.016;
+    lastTs = ts;
+
+    if (playing) {
+      var scaled = dt * SIM_SPEED;
+      var sub = 4, h2 = scaled / sub;
+      for (var i = 0; i < sub; i++) { z = rk4(z, simT, h2, m0, c0, 1); simT += h2; }
+      if (simT >= T_FINAL) { simT = 0; z = initState(); }
+      tickStats(ts);
+    }
+
+    renderStage();
+    updateStatsDom();
+    requestAnimationFrame(frame);
+  }
+
+  syncLabels();
+  buildBatch();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
