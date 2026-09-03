@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar Racing Vehicle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "orange" — varied only by
+    lightness/saturation, matching green, gold, blue, violet, red, and teal
+    across the rest of the portfolio. Committed to one dark world (no
+    light-mode variant).
+  */
+  :root {
+    --bg: #170f04;
+    --surface: #21160a;
+    --surface-2: #2b1d0e;
+    --ink: #f7f0e4;
+    --ink-dim: #a89372;
+    --line: rgba(240,220,180,0.13);
+
+    --o-bright: #ff9a3c;               /* the car / available drive force */
+    --o-bright-soft: rgba(255,154,60,0.14);
+    --o-deep: #7a4a1a;                 /* resistance (drag + rolling) */
+    --o-mid: #d9a24a;                  /* traction limit */
+    --o-pale: #f5dfb3;                 /* headline numbers, focus */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--o-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--o-pale); font-weight: 600; }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--o-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--o-pale); outline-offset: 3px; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.speed .value { color: var(--o-bright); }
+  .metric.dist .value { color: var(--o-mid); }
+  .metric.state .value { color: var(--o-pale); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.car { background: var(--o-bright); }
+  .swatch.limit { background: var(--o-mid); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--o-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--o-pale); outline-offset: 2px; }
+  button.primary { background: var(--o-bright); border-color: var(--o-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--o-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--o-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--o-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--o-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Response figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--o-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--o-mid); }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Vehicle Performance &middot; Traction-Limited Acceleration</p>
+      <h1>Solar Racing Vehicle</h1>
+      <p class="dek">A <strong>255&nbsp;kg</strong> car and driver, a <strong>5,000&nbsp;W</strong> motor, and a drag area low enough to matter — <strong>0.163&nbsp;m&sup2;</strong>. At launch, the limit isn't the motor. It's how much force the tire can put down before it just spins.</p>
+      <div class="metrics-row">
+        <div class="metric speed">
+          <span class="label">Speed</span>
+          <span class="value" id="readout-speed">0.0 mph</span>
+        </div>
+        <div class="metric dist">
+          <span class="label">Distance</span>
+          <span class="value" id="readout-dist">0 m</span>
+        </div>
+        <div class="metric state">
+          <span class="label">Limited by</span>
+          <span class="value" id="readout-state">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch car"></i>Car</span>
+          <span><i class="swatch limit"></i>Traction limit</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-reset" type="button">Reset run</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Build a different car</h2>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-power"><span>Motor power</span><span class="val" id="val-power">5000 W</span></label>
+        <input type="range" id="slider-power" min="2000" max="8000" step="100" value="5000">
+      </div>
+      <div class="field">
+        <label for="slider-mass"><span>Vehicle + driver mass</span><span class="val" id="val-mass">255 kg</span></label>
+        <input type="range" id="slider-mass" min="180" max="350" step="5" value="255">
+      </div>
+    </div>
+    <p class="panel-note">Both feed directly into the same equations of motion below — more power raises the whole force curve, more mass raises the resistance and dilutes every newton of it into less acceleration.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>What actually limits acceleration</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="forcePlot" width="520" height="360"></canvas>
+        <figcaption><span>Force vs. speed</span><span>drive, traction limit, resistance</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="speedPlot" width="520" height="360"></canvas>
+        <figcaption><span>Speed vs. time</span><span>from rest, real-time integration</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>Two limits, and a crossover between them</h2>
+    <div class="essay-body">
+      <p class="lede">A motor running at constant power delivers torque inversely proportional to speed — twice the RPM, half the torque, same power. Taken literally, that means infinite torque at zero speed. No real drivetrain gets that, and the reason isn't the motor. It's the tire.</p>
+
+      <p>At any given acceleration, some of the car's weight shifts rearward — the classic weight-transfer effect, driven by the car's actual center-of-gravity height (0.459&nbsp;m) and wheelbase (1.918&nbsp;m). Whatever normal load is left on the driven wheels, multiplied by the tire-road friction coefficient, is the hardest the tire can push before it starts to slip. The real, usable drive force at any speed is the smaller of two numbers — what the motor's power curve can deliver, and what the tire can put down:</p>
+
+      <div class="eq-block">F<span class="dim">drive</span>(v) = min( P/v ,  &mu;&middot;R<span class="dim">f</span>(a) )
+
+<span class="dim">R</span><span class="dim">f</span><span class="dim">(a) = (W/L)&middot;(b &minus; a&middot;h/g)     — front normal load under acceleration a</span>
+<span class="dim">F</span><span class="dim">resist</span><span class="dim">(v) = &mu;</span><span class="dim">rr</span><span class="dim">&middot;mg + &#189;&middot;C</span><span class="dim">d</span><span class="dim">&middot;&rho;&middot;A&middot;v&sup2;      — rolling + aerodynamic drag</span></div>
+
+      <p class="pull">Watch the force chart: at low speed the car rides the traction-limit line, not the power curve — all the motor's torque in the world wouldn't help, the tire would just spin. Only once speed climbs enough for the power-limited curve to drop below the traction ceiling does the car actually start using all its horsepower. Every real launch works this way, electric or not.</p>
+
+      <p>Two things are corrected here relative to the original calculation, both worth stating plainly. First, the original computed time-to-speed as <code>speed &divide; acceleration-at-that-speed</code> — treating the final acceleration as if it applied for the whole run, rather than integrating the actual, changing acceleration from a stop. This page instead solves the real equation of motion, <code>m&middot;dv/dt = F<span style="font-size:0.75em">drive</span>(v) &minus; F<span style="font-size:0.75em">resist</span>(v)</code>, forward in time. Second, the original's constant-power torque formula was evaluated starting from 0&nbsp;RPM, where it's mathematically infinite; the traction limit above is what actually caps it, the way it does on a real car.</p>
+
+      <p>The car's real top speed — where drive force and resistance finally balance and acceleration hits zero — comes out well past highway speed for these numbers, a direct consequence of how little aerodynamic drag area (0.163&nbsp;m&sup2;) buys a vehicle shaped like this one.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from undergraduate coursework in vehicle performance (constant-power acceleration with tire-traction-limited launch). The motor, mass, and drag figures are the original calculation's; the equations of motion are integrated forward in time, in-browser, rather than estimated from a single terminal acceleration value.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    bg: "23,15,4",
+    bright: "255,154,60",
+    deep: "122,74,26",
+    mid: "217,162,74",
+    pale: "245,223,179",
+    ink: "247,240,228",
+    line: "240,220,180"
+  };
+
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- Real extracted vehicle parameters ----------------
+  var Crr = 0.015, Cd = 0.19, dragArea = 0.163, rho = 1.225;
+  var h = 0.459, l = 1.918, b = 1.058, g = 9.81;
+  var muTire = 0.9, radius = 0.45;
+  var MPH = 0.44704; // m/s per mph
+
+  var power = 5000, mass = 255;
+
+  function resistForce(v) {
+    return Crr * mass * g + 0.5 * Cd * rho * dragArea * v * v;
+  }
+  // Usable drive force: the smaller of the motor's constant-power torque
+  // curve and the tire's traction limit under the *previous* step's
+  // acceleration (weight transfer). This is what naturally caps the force
+  // at low speed instead of the naive formula's divide-by-zero at v=0.
+  function driveForce(v, aPrev) {
+    var w = mass * g;
+    var omega = Math.max(v, 1e-6) / radius;
+    var rpm = omega * 60 / (2 * Math.PI);
+    var Fpower = (9.5488 * power / rpm) / radius;
+    var Rf = (w / l) * (b - aPrev * h / g);
+    var Ftraction = muTire * Rf;
+    return { F: Math.min(Fpower, Ftraction), Fpower: Fpower, Ftraction: Ftraction };
+  }
+
+  function derivs(v, aPrev) {
+    var d = driveForce(v, aPrev);
+    var Fr = resistForce(v);
+    var a = (d.F - Fr) / mass;
+    return { a: a, Fpower: d.Fpower, Ftraction: d.Ftraction, Fdrive: d.F, Fresist: Fr };
+  }
+  function rk4Step(v, aPrev, dt) {
+    var k1 = derivs(v, aPrev).a;
+    var k2 = derivs(v + dt/2*k1, aPrev).a;
+    var k3 = derivs(v + dt/2*k2, aPrev).a;
+    var k4 = derivs(v + dt*k3, aPrev).a;
+    var vNext = Math.max(0, v + dt/6*(k1+2*k2+2*k3+k4));
+    return vNext;
+  }
+
+  // ---------------- Live state ----------------
+  var v = 0, dist = 0, simT = 0, aPrev = 0;
+  var playing = !reduced;
+  var SIM_SPEED = 3.5; // playback speed-up so meaningful progress is visible
+
+  var sliderPower = document.getElementById("slider-power");
+  var sliderMass = document.getElementById("slider-mass");
+  var valPower = document.getElementById("val-power");
+  var valMass = document.getElementById("val-mass");
+  var readoutSpeed = document.getElementById("readout-speed");
+  var readoutDist = document.getElementById("readout-dist");
+  var readoutState = document.getElementById("readout-state");
+  var btnPlay = document.getElementById("btn-play");
+  var btnReset = document.getElementById("btn-reset");
+
+  function syncLabels() {
+    valPower.textContent = power.toFixed(0) + " W";
+    valMass.textContent = mass.toFixed(0) + " kg";
+  }
+  sliderPower.addEventListener("input", function () { power = parseFloat(sliderPower.value); syncLabels(); });
+  sliderPower.addEventListener("change", buildCharts);
+  sliderMass.addEventListener("input", function () { mass = parseFloat(sliderMass.value); syncLabels(); });
+  sliderMass.addEventListener("change", buildCharts);
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnReset.addEventListener("click", function () { v = 0; dist = 0; simT = 0; aPrev = 0; });
+
+  function updateStatsDom() {
+    readoutSpeed.textContent = (v / MPH).toFixed(1) + " mph";
+    readoutDist.textContent = Math.round(dist) + " m";
+    var d = derivs(v, aPrev);
+    readoutState.textContent = d.Ftraction < d.Fpower - 0.5 ? "Traction" : "Power";
+  }
+
+  // ---------------- Stage: car accelerating along a straight ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+  function sizeStage() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = stageHolder.clientWidth, h2 = stageHolder.clientHeight;
+    stageCanvas.width = Math.round(w*dpr); stageCanvas.height = Math.round(h2*dpr);
+    stageCtx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, hgt = stageHolder.clientHeight;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0,0,w,hgt);
+
+    var roadY = hgt * 0.72;
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.4)";
+    stageCtx.lineWidth = 1.5;
+    stageCtx.beginPath(); stageCtx.moveTo(0, roadY); stageCtx.lineTo(w, roadY); stageCtx.stroke();
+
+    // scrolling lane dashes, speed-scaled so faster = faster-scrolling road
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.28)";
+    stageCtx.setLineDash([18,16]); stageCtx.lineWidth = 2;
+    stageCtx.beginPath();
+    var scrollPx = (dist * 3) % 34;
+    stageCtx.moveTo(-scrollPx, roadY + 22); stageCtx.lineTo(w, roadY + 22);
+    stageCtx.stroke(); stageCtx.setLineDash([]);
+
+    // car: low, sleek silhouette, fixed on screen (road scrolls beneath it)
+    var cx = w * 0.28, cy = roadY - 12;
+    stageCtx.fillStyle = "rgb(" + T.bright + ")";
+    var bw = 70, bh = 16;
+    stageCtx.beginPath();
+    stageCtx.moveTo(cx - bw/2, cy);
+    stageCtx.lineTo(cx - bw/2 + 14, cy - bh);
+    stageCtx.lineTo(cx + bw/2 - 10, cy - bh*0.6);
+    stageCtx.lineTo(cx + bw/2, cy);
+    stageCtx.closePath();
+    stageCtx.fill();
+    stageCtx.fillStyle = "rgba(" + T.bg + ",0.9)";
+    stageCtx.beginPath(); stageCtx.arc(cx - bw*0.28, cy, 6, 0, Math.PI*2); stageCtx.fill();
+    stageCtx.beginPath(); stageCtx.arc(cx + bw*0.28, cy, 6, 0, Math.PI*2); stageCtx.fill();
+
+    // speed lines behind the car, length scales with speed
+    var speedFrac = Math.min(1, v / 40);
+    stageCtx.strokeStyle = "rgba(" + T.mid + "," + (0.35*speedFrac).toFixed(3) + ")";
+    stageCtx.lineWidth = 1.5;
+    for (var i = 0; i < 4; i++) {
+      var ly = cy - bh*0.3 + i*7;
+      var len = 14 + speedFrac*40;
+      stageCtx.beginPath();
+      stageCtx.moveTo(cx - bw/2 - 6, ly);
+      stageCtx.lineTo(cx - bw/2 - 6 - len, ly);
+      stageCtx.stroke();
+    }
+  }
+
+  // ---------------- Force-vs-speed chart ----------------
+  var forceCanvas = document.getElementById("forcePlot"), forceCtx = forceCanvas.getContext("2d");
+  var speedCanvas = document.getElementById("speedPlot"), speedCtx = speedCanvas.getContext("2d");
+  var forceData = null, speedData = null;
+
+  function axes(ctx, w, h2, m) {
+    ctx.strokeStyle = "rgba(" + T.line + ",0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(m, h2 - m); ctx.lineTo(w - 10, h2 - m);
+    ctx.moveTo(m, 10); ctx.lineTo(m, h2 - 10);
+    ctx.stroke();
+  }
+
+  function buildForceData() {
+    var out = [];
+    var vMax = 40; // m/s, ~90 mph — covers the interesting part of the curve
+    var n = 100;
+    for (var i = 0; i <= n; i++) {
+      var vv = 0.3 + (vMax - 0.3) * (i / n);
+      var d = derivs(vv, 0); // static (a=0) traction limit for a clean, single reference curve
+      out.push({ v: vv, Fpower: d.Fpower, Ftraction: d.Ftraction, Fresist: d.Fresist });
+    }
+    return out;
+  }
+  function buildSpeedData() {
+    var out = [];
+    var dt = 0.02, tmax = 30, vv = 0, ap = 0;
+    var t = 0;
+    while (t < tmax) {
+      var d = derivs(vv, ap);
+      vv = rk4Step(vv, ap, dt);
+      ap = d.a;
+      t += dt;
+      out.push({ t: t, v: vv / MPH });
+    }
+    return out;
+  }
+
+  function renderForceChart() {
+    var w = forceCanvas.width, hgt = forceCanvas.height, m = 34;
+    forceCtx.fillStyle = "rgb(" + T.bg + ")"; forceCtx.fillRect(0,0,w,hgt);
+    axes(forceCtx, w, hgt, m);
+    if (!forceData) return;
+    var maxF = 0;
+    forceData.forEach(function(p){ maxF = Math.max(maxF, Math.min(p.Fpower, 1600), p.Ftraction, p.Fresist); });
+    maxF *= 1.1;
+    var vMax = forceData[forceData.length-1].v;
+    function mapX(v){ return m + (v/vMax)*(w-m-10); }
+    function mapY(f){ return (hgt-m) - (Math.min(f,maxF)/maxF)*(hgt-m-10); }
+
+    function line(key, color, width, dash) {
+      forceCtx.strokeStyle = "rgb(" + color + ")"; forceCtx.lineWidth = width;
+      if (dash) forceCtx.setLineDash(dash);
+      forceCtx.beginPath();
+      forceData.forEach(function(p,i){ var x=mapX(p.v), y=mapY(p[key]); if(i===0) forceCtx.moveTo(x,y); else forceCtx.lineTo(x,y); });
+      forceCtx.stroke();
+      forceCtx.setLineDash([]);
+    }
+    line("Fresist", T.deep, 1.6);
+    line("Ftraction", T.mid, 1.6, [4,4]);
+    line("Fpower", T.bright, 2.2);
+  }
+  function renderSpeedChart() {
+    var w = speedCanvas.width, hgt = speedCanvas.height, m = 34;
+    speedCtx.fillStyle = "rgb(" + T.bg + ")"; speedCtx.fillRect(0,0,w,hgt);
+    axes(speedCtx, w, hgt, m);
+    if (!speedData) return;
+    var maxV = 0;
+    speedData.forEach(function(p){ maxV = Math.max(maxV, p.v); });
+    maxV *= 1.1;
+    var tMax = speedData[speedData.length-1].t;
+    function mapX(t){ return m + (t/tMax)*(w-m-10); }
+    function mapY(v){ return (hgt-m) - (v/maxV)*(hgt-m-10); }
+    speedCtx.strokeStyle = "rgb(" + T.bright + ")"; speedCtx.lineWidth = 2.2;
+    speedCtx.beginPath();
+    speedData.forEach(function(p,i){ var x=mapX(p.t), y=mapY(p.v); if(i===0) speedCtx.moveTo(x,y); else speedCtx.lineTo(x,y); });
+    speedCtx.stroke();
+  }
+  function buildCharts() {
+    forceData = buildForceData();
+    speedData = buildSpeedData();
+    renderForceChart();
+    renderSpeedChart();
+  }
+
+  // ---------------- Main loop ----------------
+  var lastTs = 0;
+  var LAP_DISTANCE = 1200; // m, resets the run for a continuous demo
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts-lastTs)/1000, 0.05) : 0.016;
+    lastTs = ts;
+    if (playing) {
+      var scaled = dt * SIM_SPEED;
+      var sub = 4, h2 = scaled/sub;
+      for (var i=0;i<sub;i++) {
+        var d = derivs(v, aPrev);
+        v = rk4Step(v, aPrev, h2);
+        aPrev = d.a;
+        dist += v*h2;
+        simT += h2;
+      }
+      if (dist > LAP_DISTANCE) { v = 0; dist = 0; simT = 0; aPrev = 0; }
+    }
+    renderStage();
+    updateStatsDom();
+    requestAnimationFrame(frame);
+  }
+
+  syncLabels();
+  buildCharts();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

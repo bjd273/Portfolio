@@ -258,6 +258,7 @@
     suspension: "185,140,255",
     veh14: "255,92,92",
     aircraft: "56,224,208",
+    solar: "255,154,60",
     queued: "90,97,105"
   };
 
@@ -305,9 +306,10 @@
       meta: ["LQR + integral action", "Riccati equation", "Flight dynamics"]
     },
     {
-      id: "solar", title: "Solar Racing Vehicle", kind: "Queued",
-      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
-      blurb: "Longitudinal performance model for a solar race car: rolling and aerodynamic resistance, motor torque curves, and the traction limit that caps acceleration.",
+      id: "solar", title: "Solar Racing Vehicle", kind: "Live",
+      rgb: C.solar, hex: "#ff9a3c",
+      url: "projects/solar-racing.html", sim: "solar",
+      blurb: "Longitudinal performance model for a solar race car: rolling and aerodynamic resistance, motor torque curves, and the traction limit that caps acceleration — integrated live from rest, not estimated from a single terminal value.",
       meta: ["Longitudinal dynamics", "Powertrain", "Traction limit"]
     }
   ];
@@ -893,6 +895,55 @@
     };
   }
 
+  // Solar Racing Vehicle — same corrected equation of motion (power-limited
+  // vs traction-limited drive force) as the full project page, run
+  // continuously from a stop for this small preview.
+  function SolarSim() {
+    var Crr=0.015, Cd=0.19, dragArea=0.163, rho=1.225;
+    var h=0.459, l=1.918, b=1.058, g=9.81, muTire=0.9, radius=0.45;
+    var MPH=0.44704;
+    var power=5000, mass=255;
+    function resistForce(v){ return Crr*mass*g + 0.5*Cd*rho*dragArea*v*v; }
+    function driveForce(v, aPrev){
+      var w=mass*g;
+      var omega=Math.max(v,1e-6)/radius, rpm=omega*60/(2*Math.PI);
+      var Fpower=(9.5488*power/rpm)/radius;
+      var Rf=(w/l)*(b-aPrev*h/g);
+      var Ftraction=muTire*Rf;
+      return Math.min(Fpower, Ftraction);
+    }
+    function accel(v, aPrev){ return (driveForce(v,aPrev)-resistForce(v))/mass; }
+    function rk4(v, aPrev, dt){
+      var k1=accel(v,aPrev), k2=accel(v+dt/2*k1,aPrev), k3=accel(v+dt/2*k2,aPrev), k4=accel(v+dt*k3,aPrev);
+      return Math.max(0, v+dt/6*(k1+2*k2+2*k3+k4));
+    }
+    var v=0, dist=0, aPrev=0;
+    var SIM_SPEED=3.5, LAP_DISTANCE=1200;
+    this.step = function(dt){
+      var scaled=dt*SIM_SPEED, sub=4, h2=scaled/sub;
+      for(var i=0;i<sub;i++){ var a=accel(v,aPrev); v=rk4(v,aPrev,h2); aPrev=a; dist+=v*h2; }
+      if (dist>LAP_DISTANCE) { v=0; dist=0; aPrev=0; }
+    };
+    this.draw = function(g,w,h2){
+      g.fillStyle="rgb("+C.void+")"; g.fillRect(0,0,w,h2);
+      var roadY=h2*0.72;
+      g.strokeStyle="rgba("+C.dim+",0.5)"; g.lineWidth=1.2;
+      g.beginPath(); g.moveTo(0,roadY); g.lineTo(w,roadY); g.stroke();
+      var cx=w*0.3, cy=roadY-6;
+      g.fillStyle="rgb("+C.solar+")";
+      var bw=34, bh=8;
+      g.beginPath();
+      g.moveTo(cx-bw/2, cy); g.lineTo(cx-bw/2+7, cy-bh); g.lineTo(cx+bw/2-5, cy-bh*0.6); g.lineTo(cx+bw/2, cy);
+      g.closePath(); g.fill();
+      var speedFrac = Math.min(1, v/40);
+      g.strokeStyle="rgba("+C.dim+","+(0.4*speedFrac).toFixed(3)+")"; g.lineWidth=1.2;
+      for (var i=0;i<3;i++){
+        var ly=cy-bh*0.3+i*4, len=6+speedFrac*18;
+        g.beginPath(); g.moveTo(cx-bw/2-3, ly); g.lineTo(cx-bw/2-3-len, ly); g.stroke();
+      }
+    };
+  }
+
   function makeSim(kind) {
     if (kind === "pendulum") return new PendulumSim();
     if (kind === "robot") return new RobotSim();
@@ -900,6 +951,7 @@
     if (kind === "suspension") return new SuspensionSim();
     if (kind === "veh14") return new Veh14Sim();
     if (kind === "aircraft") return new AircraftSim();
+    if (kind === "solar") return new SolarSim();
     return new QueuedSim();
   }
 
