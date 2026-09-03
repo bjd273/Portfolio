@@ -256,6 +256,7 @@
     robot: "255,207,63",
     acc: "63,169,255",
     suspension: "185,140,255",
+    veh14: "255,92,92",
     queued: "90,97,105"
   };
 
@@ -282,10 +283,11 @@
       meta: ["PID pole placement", "Sensitivity analysis", "Monte Carlo"]
     },
     {
-      id: "veh14", title: "14-DOF Vehicle Model", kind: "Queued",
-      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
-      blurb: "Full multibody passenger vehicle — 1,405 blocks, Stateflow suspension kinematics, and swappable Magic Formula / Fiala / Dugoff tire models side by side.",
-      meta: ["Multibody dynamics", "Tire models", "K&C suspension"]
+      id: "veh14", title: "14-DOF Vehicle Model", kind: "Live",
+      rgb: C.veh14, hex: "#ff5c5c",
+      url: "projects/vehicle-14dof.html", sim: "veh14",
+      blurb: "A car corners on its actual Magic Formula tire curve — real mass, inertia, and geometry pulled from the 14-DOF reference model, driven through a single-track handling model until the front tires visibly run out of grip.",
+      meta: ["Magic Formula tire", "Nonlinear handling", "Bicycle model"]
     },
     {
       id: "suspension", title: "Active Suspension", kind: "Live",
@@ -760,11 +762,74 @@
     };
   }
 
+  // 14-DOF Vehicle Model — same single-track handling model, real mass/
+  // inertia/geometry, and real Magic Formula tire curve as the full project
+  // page, held at a fixed steer angle for this small preview.
+  function Veh14Sim() {
+    var m=1181, Iz=2066, aF=1.515, bR=1.504;
+    var FzF=2886, FzR=2907;
+    var PCY1=1.34299950037631, PDY1=0.878267729082195, PDY2=-0.0644597923147385;
+    var PEY1=-0.809776534470972, PEY2=-0.600180598867198;
+    var PKY1=-15.5714726518315, PKY2=1.73126522291751, FZ0=4000;
+    function tireFy(alpha, Fz) {
+      var dfz=(Fz-FZ0)/FZ0, D=(PDY1+PDY2*dfz)*Fz, C_=PCY1;
+      var BCD=PKY1*FZ0*Math.sin(2*Math.atan(Fz/(PKY2*FZ0))), B=BCD/(C_*D);
+      var E=PEY1+PEY2*dfz, x=B*alpha;
+      return D*Math.sin(C_*Math.atan(x-E*(x-Math.atan(x))));
+    }
+    function deriv(state, delta, vx) {
+      var vy=state[0], r=state[1];
+      var alphaF=delta-Math.atan2(vy+aF*r,vx), alphaR=-Math.atan2(vy-bR*r,vx);
+      var Fyf=-tireFy(alphaF,FzF)*2, Fyr=-tireFy(alphaR,FzR)*2;
+      return [(Fyf*Math.cos(delta)+Fyr)/m - vx*r, (aF*Fyf*Math.cos(delta)-bR*Fyr)/Iz];
+    }
+    function rk4(state, delta, vx, dt) {
+      var k1=deriv(state,delta,vx);
+      var k2=deriv([state[0]+dt/2*k1[0],state[1]+dt/2*k1[1]],delta,vx);
+      var k3=deriv([state[0]+dt/2*k2[0],state[1]+dt/2*k2[1]],delta,vx);
+      var k4=deriv([state[0]+dt*k3[0],state[1]+dt*k3[1]],delta,vx);
+      return [state[0]+dt/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]), state[1]+dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1])];
+    }
+    var delta = 10*Math.PI/180, speed = 15;
+    var vyr=[0,0], carX=0, carY=0, carPsi=0, trail=[];
+    this.step = function(dt){
+      var sub=4, h=dt/sub;
+      for (var i=0;i<sub;i++){
+        vyr = rk4(vyr, delta, speed, h);
+        carX += (speed*Math.cos(carPsi) - vyr[0]*Math.sin(carPsi))*h;
+        carY += (speed*Math.sin(carPsi) + vyr[0]*Math.cos(carPsi))*h;
+        carPsi += vyr[1]*h;
+      }
+      trail.push([carX,carY]);
+      if (trail.length>400) trail.shift();
+    };
+    this.draw = function(g,w,h){
+      g.fillStyle="rgb("+C.void+")"; g.fillRect(0,0,w,h);
+      var pxPerM=3.4, camX=w/2-carX*pxPerM, camY=h/2+carY*pxPerM;
+      if (trail.length>1) {
+        g.strokeStyle="rgba("+C.veh14+",0.7)"; g.lineWidth=1.6;
+        g.beginPath();
+        trail.forEach(function(p,i){
+          var sx=camX+p[0]*pxPerM, sy=camY-p[1]*pxPerM;
+          if(i===0) g.moveTo(sx,sy); else g.lineTo(sx,sy);
+        });
+        g.stroke();
+      }
+      var cx=w/2, cy=h/2, len=10, wid=6;
+      var cosP=Math.cos(carPsi), sinP=Math.sin(carPsi);
+      function toScreen(lx,ly){ var wx=lx*cosP-ly*sinP, wy=lx*sinP+ly*cosP; return [cx+wx, cy-wy]; }
+      var p1=toScreen(len*0.6,0), p2=toScreen(-len*0.4,wid*0.5), p3=toScreen(-len*0.4,-wid*0.5);
+      g.fillStyle="rgb("+C.veh14+")";
+      g.beginPath(); g.moveTo(p1[0],p1[1]); g.lineTo(p2[0],p2[1]); g.lineTo(p3[0],p3[1]); g.closePath(); g.fill();
+    };
+  }
+
   function makeSim(kind) {
     if (kind === "pendulum") return new PendulumSim();
     if (kind === "robot") return new RobotSim();
     if (kind === "acc") return new AccSim();
     if (kind === "suspension") return new SuspensionSim();
+    if (kind === "veh14") return new Veh14Sim();
     return new QueuedSim();
   }
 

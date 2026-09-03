@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>14-DOF Vehicle Model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "red" — varied only by
+    lightness/saturation, matching green (pendulum), gold (robot nav), blue
+    (adaptive cruise control), and violet (active suspension). Committed to
+    one dark world (no light-mode variant).
+  */
+  :root {
+    --bg: #170a0a;
+    --surface: #221010;
+    --surface-2: #2c1515;
+    --ink: #f7ecec;
+    --ink-dim: #a38484;
+    --line: rgba(240,200,200,0.13);
+
+    --r-bright: #ff5c5c;               /* car / front tire curve */
+    --r-bright-soft: rgba(255,92,92,0.14);
+    --r-deep: #7a2b2b;                 /* rear tire curve */
+    --r-mid: #cf6b6b;                  /* live operating point / synthesis */
+    --r-pale: #f5c9c9;                 /* headline numbers, focus */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--r-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--r-pale); font-weight: 600; }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--r-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--r-pale); outline-offset: 3px; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.yaw .value { color: var(--r-bright); }
+  .metric.accel .value { color: var(--r-mid); }
+  .metric.slip .value { color: var(--r-pale); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.car { background: var(--r-bright); }
+  .swatch.path { background: var(--r-mid); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--r-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--r-pale); outline-offset: 2px; }
+  button.primary { background: var(--r-bright); border-color: var(--r-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--r-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--r-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--r-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--r-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-actions { margin-top: 30px; display: flex; gap: 10px; }
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Response figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--r-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--r-mid); }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Vehicle Dynamics &middot; Nonlinear Tire Mechanics</p>
+      <h1>14-DOF Vehicle Model</h1>
+      <p class="dek">A <strong>1,181&nbsp;kg</strong> car corners on its actual Magic Formula tire curve, not a straight line through the origin. Push the steering angle far enough and the front tires stop giving you more turn for more wheel — that's not a bug, that's the real tire.</p>
+      <div class="metrics-row">
+        <div class="metric yaw">
+          <span class="label">Yaw rate</span>
+          <span class="value" id="readout-yaw">0.0&deg;/s</span>
+        </div>
+        <div class="metric accel">
+          <span class="label">Lateral accel</span>
+          <span class="value" id="readout-accel">0.00 g</span>
+        </div>
+        <div class="metric slip">
+          <span class="label">Front slip angle</span>
+          <span class="value" id="readout-slip">0.0&deg;</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch car"></i>Car</span>
+          <span><i class="swatch path"></i>Path driven</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-reset" type="button">Reset</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Drive it</h2>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-steer"><span>Steering angle</span><span class="val" id="val-steer">10&deg;</span></label>
+        <input type="range" id="slider-steer" min="0" max="35" step="0.5" value="10">
+      </div>
+      <div class="field">
+        <label for="slider-speed"><span>Speed</span><span class="val" id="val-speed">15 m/s</span></label>
+        <input type="range" id="slider-speed" min="5" max="25" step="0.5" value="15">
+      </div>
+    </div>
+    <p class="panel-note">Both sliders act instantly, like a real steering wheel and throttle. Watch the operating-point markers on the tire-curve chart slide toward the peak — and past it — as you turn in harder.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>The real tire curve</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="tirePlot" width="520" height="360"></canvas>
+        <figcaption><span>Lateral force vs. slip angle</span><span>front &amp; rear, live operating point</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="yawPlot" width="520" height="360"></canvas>
+        <figcaption><span>Steady yaw rate vs. steering angle</span><span>where understeer saturates</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>What fourteen degrees of freedom actually buys you</h2>
+    <div class="essay-body">
+      <p class="lede">A full vehicle model — the kind used to validate a real suspension or a stability-control system before it ever touches a test track — doesn't stop at "the car turns when you steer it." The reference model this page is built from carries fourteen degrees of freedom: six for the body (moving and rotating in three dimensions), one heave state for each of the four wheels, and one spin state for each wheel again. Underneath all fourteen, the part that actually decides how the car behaves is the same four contact patches doing the same nonlinear thing tires always do.</p>
+
+      <p>This page doesn't run all fourteen. What it runs is real: the vehicle's actual mass (1,181&nbsp;kg), yaw inertia (2,066&nbsp;kg&middot;m&sup2;), and the exact distances from its center of gravity to each axle (1.515&nbsp;m front, 1.504&nbsp;m rear) — extracted directly from the reference model's own data, not textbook stand-ins. Left out, and said plainly: the suspension's heave and roll, and each wheel's own spin dynamics. What's left is the classic three-state "bicycle model" — lateral velocity, yaw rate, and the tire physics in between:</p>
+
+      <div class="eq-block">m(v&#775;<span class="dim">y</span> + v<span class="dim">x</span>r) = F<span class="dim">yf</span>cos&delta; + F<span class="dim">yr</span>
+I<span class="dim">z</span>r&#775; = a&middot;F<span class="dim">yf</span>cos&delta; &minus; b&middot;F<span class="dim">yr</span>
+
+<span class="dim">&alpha;f = &delta; &minus; atan((v</span><span class="dim">y</span><span class="dim">+ar)/v</span><span class="dim">x</span><span class="dim">)      &alpha;r = &minus;atan((v</span><span class="dim">y</span><span class="dim">&minus;br)/v</span><span class="dim">x</span><span class="dim">)</span></div>
+
+      <p>The part that makes this worth building at all is F<sub>y</sub>(&alpha;) — the tire's lateral force as a function of slip angle. The easy version of this model uses a straight line: force proportional to slip angle, forever. Real tires don't. They build force quickly at first, peak somewhere around 6&ndash;10&deg; of slip, and then <em>give some back</em> as the rubber starts to slide instead of grip. The curve on this page is the vehicle's own Magic Formula (Pacejka) tire data, pulled from the same reference model — the same one used for both axles, since this vehicle's own configuration doesn't specify a different front and rear tire.</p>
+
+      <p class="pull">Turn the wheel further, and the yaw-rate chart tells the real story: it climbs, peaks within the first ten degrees or so of steering angle, and then starts <em>falling</em> even as you keep adding lock. That's the tire curve talking. Past its grip peak, more steering angle just adds slip angle — heat, not turning.</p>
+
+      <p>One piece of the tire model is a disclosed simplification rather than the full reference formula: the curve's steepness near zero slip (B, in Magic-Formula terms) is derived here from the tire's real cornering-stiffness coefficients (P<sub>KY1</sub>, P<sub>KY2</sub>) at each axle's actual static load, rather than the complete load- and camber-dependent formula the full reference tire model uses. The curve's shape and peak — where the interesting behavior lives — are the vehicle's own numbers.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from a MathWorks Vehicle Dynamics Blockset reference model (14-DOF passenger vehicle, Magic Formula tire, MacPherson/solid-axle suspension). Mass, inertia, geometry, and tire coefficients were extracted directly from the model's own data files; the single-track handling model and tire curve are solved and rendered live, in-browser.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    bg: "23,10,10",
+    bright: "255,92,92",
+    deep: "122,43,43",
+    mid: "207,107,107",
+    pale: "245,201,201",
+    ink: "247,236,236",
+    line: "240,200,200"
+  };
+
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- Real extracted vehicle parameters ----------------
+  var m = 1181, Iz = 2066, aF = 1.515, bR = 1.504;
+  var FzF = 2886, FzR = 2907; // per-wheel static load, N
+  var PCY1 = 1.34299950037631, PDY1 = 0.878267729082195, PDY2 = -0.0644597923147385;
+  var PEY1 = -0.809776534470972, PEY2 = -0.600180598867198;
+  var PKY1 = -15.5714726518315, PKY2 = 1.73126522291751;
+  var FZ0 = 4000;
+
+  // Magic Formula, pure lateral. B is derived from the real cornering-
+  // stiffness coefficients (PKY1, PKY2) at the given load; C, D, E use the
+  // vehicle's own shape coefficients directly. See essay for what's omitted.
+  function tireFy(alpha, Fz) {
+    var dfz = (Fz - FZ0) / FZ0;
+    var D = (PDY1 + PDY2 * dfz) * Fz;
+    var C = PCY1;
+    var BCD = PKY1 * FZ0 * Math.sin(2 * Math.atan(Fz / (PKY2 * FZ0)));
+    var B = BCD / (C * D);
+    var E = PEY1 + PEY2 * dfz;
+    var x = B * alpha;
+    return D * Math.sin(C * Math.atan(x - E * (x - Math.atan(x))));
+  }
+
+  function derivs(state, delta, vx) {
+    var vy = state[0], r = state[1];
+    var alphaF = delta - Math.atan2(vy + aF * r, vx);
+    var alphaR = -Math.atan2(vy - bR * r, vx);
+    // Sign and the x2 (two wheels per axle) verified against expected
+    // physical behavior: stable, near-zero sideslip, understeer saturation.
+    var Fyf = -tireFy(alphaF, FzF) * 2;
+    var Fyr = -tireFy(alphaR, FzR) * 2;
+    var vyDot = (Fyf * Math.cos(delta) + Fyr) / m - vx * r;
+    var rDot = (aF * Fyf * Math.cos(delta) - bR * Fyr) / Iz;
+    return { d: [vyDot, rDot], alphaF: alphaF, alphaR: alphaR, Fyf: Fyf, Fyr: Fyr };
+  }
+  function rk4(state, delta, vx, dt) {
+    var k1 = derivs(state, delta, vx);
+    var k2 = derivs([state[0] + dt / 2 * k1.d[0], state[1] + dt / 2 * k1.d[1]], delta, vx);
+    var k3 = derivs([state[0] + dt / 2 * k2.d[0], state[1] + dt / 2 * k2.d[1]], delta, vx);
+    var k4 = derivs([state[0] + dt * k3.d[0], state[1] + dt * k3.d[1]], delta, vx);
+    return [
+      state[0] + dt / 6 * (k1.d[0] + 2 * k2.d[0] + 2 * k3.d[0] + k4.d[0]),
+      state[1] + dt / 6 * (k1.d[1] + 2 * k2.d[1] + 2 * k3.d[1] + k4.d[1])
+    ];
+  }
+
+  // ---------------- Live state ----------------
+  var vyr = [0, 0];
+  var carX = 0, carY = 0, carPsi = 0;
+  var trail = [];
+  var steerDeg = 10, speed = 15;
+  var playing = !reduced;
+  var lastInfo = derivs(vyr, 0, speed);
+
+  var sliderSteer = document.getElementById("slider-steer");
+  var sliderSpeed = document.getElementById("slider-speed");
+  var valSteer = document.getElementById("val-steer");
+  var valSpeed = document.getElementById("val-speed");
+  var readoutYaw = document.getElementById("readout-yaw");
+  var readoutAccel = document.getElementById("readout-accel");
+  var readoutSlip = document.getElementById("readout-slip");
+  var btnPlay = document.getElementById("btn-play");
+  var btnReset = document.getElementById("btn-reset");
+
+  function syncLabels() {
+    valSteer.textContent = steerDeg.toFixed(1) + "°";
+    valSpeed.textContent = speed.toFixed(1) + " m/s";
+  }
+  sliderSteer.addEventListener("input", function () { steerDeg = parseFloat(sliderSteer.value); syncLabels(); renderTireChart(); });
+  sliderSpeed.addEventListener("input", function () { speed = parseFloat(sliderSpeed.value); syncLabels(); });
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnReset.addEventListener("click", function () {
+    vyr = [0, 0]; carX = 0; carY = 0; carPsi = 0; trail = [];
+  });
+
+  function updateStatsDom() {
+    // vyr[1] is the yaw RATE state (r); lastInfo.d[1] is its derivative
+    // (angular acceleration) — displaying the derivative here was the bug.
+    readoutYaw.textContent = (vyr[1] * 180 / Math.PI).toFixed(1) + "°/s";
+    var latAccel = (speed * vyr[1]) / 9.81;
+    readoutAccel.textContent = Math.abs(latAccel).toFixed(2) + " g";
+    readoutSlip.textContent = Math.abs(lastInfo.alphaF * 180 / Math.PI).toFixed(1) + "°";
+  }
+
+  // ---------------- Stage: top-down car + driven path ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+
+  function sizeStage() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCanvas.width = Math.round(w * dpr);
+    stageCanvas.height = Math.round(h * dpr);
+    stageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0, 0, w, h);
+
+    var pxPerM = 5.5;
+    var camX = w / 2 - carX * pxPerM, camY = h / 2 + carY * pxPerM;
+
+    // faint grid for spatial reference
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.12)";
+    stageCtx.lineWidth = 1;
+    var grid = 10 * pxPerM;
+    var offX = camX % grid, offY = camY % grid;
+    for (var gx = offX; gx < w; gx += grid) { stageCtx.beginPath(); stageCtx.moveTo(gx, 0); stageCtx.lineTo(gx, h); stageCtx.stroke(); }
+    for (var gy = offY; gy < h; gy += grid) { stageCtx.beginPath(); stageCtx.moveTo(0, gy); stageCtx.lineTo(w, gy); stageCtx.stroke(); }
+
+    // driven path
+    if (trail.length > 1) {
+      stageCtx.strokeStyle = "rgba(" + T.mid + ",0.8)";
+      stageCtx.lineWidth = 2;
+      stageCtx.beginPath();
+      trail.forEach(function (p, i) {
+        var sx = camX + p[0] * pxPerM, sy = camY - p[1] * pxPerM;
+        if (i === 0) stageCtx.moveTo(sx, sy); else stageCtx.lineTo(sx, sy);
+      });
+      stageCtx.stroke();
+    }
+
+    // car (triangle pointing along heading psi; screen y is flipped vs world y)
+    var cx = w / 2, cy = h / 2;
+    var carLen = 20, carW = 11;
+    var cosP = Math.cos(carPsi), sinP = Math.sin(carPsi);
+    function worldToScreen(lx, ly) {
+      // lx forward, ly left, in car frame
+      var wx = lx * cosP - ly * sinP, wy = lx * sinP + ly * cosP;
+      return [cx + wx, cy - wy];
+    }
+    var p1 = worldToScreen(carLen * 0.6, 0);
+    var p2 = worldToScreen(-carLen * 0.4, carW * 0.5);
+    var p3 = worldToScreen(-carLen * 0.4, -carW * 0.5);
+    stageCtx.fillStyle = "rgb(" + T.bright + ")";
+    stageCtx.beginPath();
+    stageCtx.moveTo(p1[0], p1[1]); stageCtx.lineTo(p2[0], p2[1]); stageCtx.lineTo(p3[0], p3[1]);
+    stageCtx.closePath(); stageCtx.fill();
+  }
+
+  // ---------------- Tire curve chart with live operating point ----------------
+  var tireCanvas = document.getElementById("tirePlot"), tireCtx = tireCanvas.getContext("2d");
+  var ALPHA_MAX = 20 * Math.PI / 180;
+
+  function axes(ctx, w, h, m) {
+    ctx.strokeStyle = "rgba(" + T.line + ",0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(m, h / 2); ctx.lineTo(w - 10, h / 2);
+    ctx.moveTo(m, 10); ctx.lineTo(m, h - 10);
+    ctx.stroke();
+  }
+
+  function renderTireChart() {
+    var w = tireCanvas.width, h = tireCanvas.height, mrg = 34;
+    tireCtx.fillStyle = "rgb(" + T.bg + ")";
+    tireCtx.fillRect(0, 0, w, h);
+    axes(tireCtx, w, h, mrg);
+
+    var maxFy = 3200;
+    function mapX(alpha) { return mrg + ((alpha + ALPHA_MAX) / (2 * ALPHA_MAX)) * (w - mrg - 10); }
+    function mapY(fy) { return h / 2 - (fy / maxFy) * (h / 2 - 14); }
+
+    function drawCurve(Fz, color) {
+      tireCtx.strokeStyle = "rgb(" + color + ")";
+      tireCtx.lineWidth = 2;
+      tireCtx.beginPath();
+      var n = 80;
+      for (var i = 0; i <= n; i++) {
+        var alpha = -ALPHA_MAX + (2 * ALPHA_MAX) * (i / n);
+        var fy = -tireFy(alpha, Fz); // matches the sign used in the dynamics
+        var x = mapX(alpha), y = mapY(fy);
+        if (i === 0) tireCtx.moveTo(x, y); else tireCtx.lineTo(x, y);
+      }
+      tireCtx.stroke();
+    }
+    drawCurve(FzF, T.bright);
+    drawCurve(FzR, T.deep);
+
+    // live operating point markers
+    function marker(alpha, Fz, color) {
+      var fy = -tireFy(alpha, Fz);
+      var x = mapX(alpha), y = mapY(fy);
+      tireCtx.fillStyle = "rgb(" + color + ")";
+      tireCtx.beginPath(); tireCtx.arc(x, y, 5, 0, Math.PI * 2); tireCtx.fill();
+    }
+    marker(lastInfo.alphaF, FzF, T.pale);
+    marker(lastInfo.alphaR, FzR, T.mid);
+  }
+
+  // ---------------- Steady-state yaw rate vs steering angle (static plot) ----------------
+  var yawCanvas = document.getElementById("yawPlot"), yawCtx = yawCanvas.getContext("2d");
+  function steadyYawRate(deltaDeg, vx) {
+    // This system settles more slowly than it first appears — a fixed
+    // 8-second run here previously caught the yaw rate mid-overshoot rather
+    // than at its true steady value (confirmed by running much longer and
+    // watching it keep drifting for 20+ simulated seconds). Iterate to an
+    // actual convergence criterion instead of trusting a fixed duration.
+    var delta = deltaDeg * Math.PI / 180;
+    var state = [0, 0];
+    var dt = 0.002, maxSteps = 40000; // hard cap: 80s of simulated time
+    for (var i = 0; i < maxSteps; i++) {
+      var next = rk4(state, delta, vx, dt);
+      if (i > 500 && Math.abs(next[1] - state[1]) < 1e-9) { state = next; break; }
+      state = next;
+    }
+    return state[1];
+  }
+  function renderYawChart() {
+    var w = yawCanvas.width, h = yawCanvas.height, mrg = 34;
+    yawCtx.fillStyle = "rgb(" + T.bg + ")";
+    yawCtx.fillRect(0, 0, w, h);
+    axes(yawCtx, w, h, mrg);
+
+    var maxDelta = 35, n = 36;
+    var pts = [];
+    var maxR = 0.001;
+    for (var i = 0; i <= n; i++) {
+      var d = maxDelta * (i / n);
+      var r = steadyYawRate(d, speed);
+      pts.push([d, r]);
+      maxR = Math.max(maxR, Math.abs(r));
+    }
+    maxR *= 1.15;
+    function mapX(d) { return mrg + (d / maxDelta) * (w - mrg - 10); }
+    function mapY(r) { return (h - mrg) - (r / maxR) * (h - mrg - 10); }
+
+    yawCtx.strokeStyle = "rgb(" + T.bright + ")";
+    yawCtx.lineWidth = 2;
+    yawCtx.beginPath();
+    pts.forEach(function (p, i) { var x = mapX(p[0]), y = mapY(p[1]); if (i === 0) yawCtx.moveTo(x, y); else yawCtx.lineTo(x, y); });
+    yawCtx.stroke();
+
+    // current operating point
+    var curR = steadyYawRate(steerDeg, speed);
+    yawCtx.fillStyle = "rgb(" + T.pale + ")";
+    yawCtx.beginPath(); yawCtx.arc(mapX(steerDeg), mapY(curR), 5, 0, Math.PI * 2); yawCtx.fill();
+  }
+
+  sliderSpeed.addEventListener("change", renderYawChart);
+  sliderSteer.addEventListener("change", renderYawChart);
+
+  // ---------------- Main loop ----------------
+  var lastTs = 0;
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0.016;
+    lastTs = ts;
+
+    if (playing) {
+      var delta = steerDeg * Math.PI / 180;
+      var sub = 4, h2 = dt / sub;
+      for (var i = 0; i < sub; i++) {
+        vyr = rk4(vyr, delta, speed, h2);
+        var vy = vyr[0], r = vyr[1];
+        carX += (speed * Math.cos(carPsi) - vy * Math.sin(carPsi)) * h2;
+        carY += (speed * Math.sin(carPsi) + vy * Math.cos(carPsi)) * h2;
+        carPsi += r * h2;
+      }
+      lastInfo = derivs(vyr, delta, speed);
+      trail.push([carX, carY]);
+      if (trail.length > 1500) trail.shift();
+    }
+
+    renderStage();
+    updateStatsDom();
+    requestAnimationFrame(frame);
+  }
+
+  syncLabels();
+  renderTireChart();
+  renderYawChart();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
