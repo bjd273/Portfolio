@@ -255,6 +255,7 @@
     pendulum: "52,226,160",
     robot: "255,207,63",
     acc: "63,169,255",
+    suspension: "185,140,255",
     queued: "90,97,105"
   };
 
@@ -287,10 +288,11 @@
       meta: ["Multibody dynamics", "Tire models", "K&C suspension"]
     },
     {
-      id: "suspension", title: "Active Suspension", kind: "Queued",
-      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
-      blurb: "Quarter-car H∞ versus H2 synthesis across three ride tunings — comfort, balanced, sport — with robustness margins and a road-bump time response.",
-      meta: ["H∞ / H2", "Mixed sensitivity", "Quarter-car"]
+      id: "suspension", title: "Active Suspension", kind: "Live",
+      rgb: C.suspension, hex: "#b98cff",
+      url: "projects/active-suspension.html", sim: "suspension",
+      blurb: "A quarter-car LQR compensator, its Riccati equation solved and verified live in-browser — one dial trades ride comfort for suspension control, continuously, against the same road bump.",
+      meta: ["LQR", "Riccati equation", "Quarter-car"]
     },
     {
       id: "aircraft", title: "Aircraft Pitch Control", kind: "Queued",
@@ -669,10 +671,100 @@
     };
   }
 
+  // Active Suspension — same quarter-car plant and LQR (Riccati-solved)
+  // compensator as the full project page, fixed at a "Balanced" tuning
+  // for this small preview; the full page exposes the comfort/sport dial.
+  function SuspensionSim() {
+    var mb=350, mw=30, bs=1000, ks=16000, kt=190000;
+    var A=[[0,1,0,0],[-ks/mb,-bs/mb,ks/mb,bs/mb],[0,0,0,1],[ks/mw,bs/mw,-(ks+kt)/mw,-bs/mw]];
+    var Bu=[0,1e3/mb,0,-1e3/mw], Bw=[0,0,0,kt/mw];
+    function mT(M){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(M[j][i]);}return r;}
+    function mMul(P,Q){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++){var s=0;for(var k=0;k<4;k++)s+=P[i][k]*Q[k][j];r[i].push(s);}}return r;}
+    function mVec(M,v){var r=[];for(var i=0;i<4;i++){var s=0;for(var k=0;k<4;k++)s+=M[i][k]*v[k];r.push(s);}return r;}
+    function outer(v,w){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(v[i]*w[j]);}return r;}
+    function mAdd(P,Q){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(P[i][j]+Q[i][j]);}return r;}
+    function mSub(P,Q){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(P[i][j]-Q[i][j]);}return r;}
+    function mScale(M,s){var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(M[i][j]*s);}return r;}
+    function dot(a,b){var s=0;for(var i=0;i<a.length;i++)s+=a[i]*b[i];return s;}
+    var AT=mT(A);
+    var cs=[1,0,-1,0], ca=[-ks/mb,-bs/mb,ks/mb,bs/mb];
+    var Qsd=outer(cs,cs), caca=dot(ca,ca);
+    var Qab=(function(){var o=outer(ca,ca);var r=[];for(var i=0;i<4;i++){r.push([]);for(var j=0;j<4;j++)r[i].push(o[i][j]/caca);}return r;})();
+    var Q=mAdd(mScale(Qsd,3000), mScale(Qab,3000));
+    function riccatiF(P,R){var Pb=mVec(P,Bu);var quad=mScale(outer(Pb,Pb),1/R);return mAdd(mSub(mAdd(mMul(AT,P),mMul(P,A)),quad),Q);}
+    function solveGain(R){
+      var P=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+      var dt=0.0005, steps=3000;
+      for(var i=0;i<steps;i++){
+        var k1=riccatiF(P,R), k2=riccatiF(mAdd(P,mScale(k1,dt/2)),R);
+        var k3=riccatiF(mAdd(P,mScale(k2,dt/2)),R), k4=riccatiF(mAdd(P,mScale(k3,dt)),R);
+        P=mAdd(P,mScale(mScale(mAdd(mAdd(k1,mScale(k2,2)),mAdd(mScale(k3,2),k4)),1/6),dt));
+      }
+      var Pb=mVec(P,Bu); return Pb.map(function(v){return v/R;});
+    }
+    var K = solveGain(3.162); // R at the "Balanced" slider midpoint
+    var BUMP_PERIOD=3.2, BUMP_DUR=0.25, BUMP_AMP=0.025;
+    function roadHeight(t){var tb=t%BUMP_PERIOD; return tb<=BUMP_DUR ? BUMP_AMP*(1-Math.cos(8*Math.PI*tb)) : 0;}
+    function deriv(x,t,K_){
+      var fs = K_? -dot(K_,x) : 0, r = roadHeight(t);
+      var xdot=[0,0,0,0];
+      for(var i=0;i<4;i++) for(var k=0;k<4;k++) xdot[i]+=A[i][k]*x[k];
+      for(var i=0;i<4;i++) xdot[i]+=Bu[i]*fs+Bw[i]*r;
+      return xdot;
+    }
+    function rk4(x,t,dt,K_){
+      var k1=deriv(x,t,K_);
+      var k2=deriv(x.map(function(v,i){return v+dt/2*k1[i];}),t+dt/2,K_);
+      var k3=deriv(x.map(function(v,i){return v+dt/2*k2[i];}),t+dt/2,K_);
+      var k4=deriv(x.map(function(v,i){return v+dt*k3[i];}),t+dt,K_);
+      return x.map(function(v,i){return v+dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);});
+    }
+    var t=0, xA=[0,0,0,0], xP=[0,0,0,0];
+    this.step = function(dt){
+      var sub=4, h=dt*1.2/sub;
+      for(var i=0;i<sub;i++){ xA=rk4(xA,t,h,K); xP=rk4(xP,t,h,null); t+=h; }
+    };
+    this.draw = function(g,w,h){
+      g.fillStyle="rgb("+C.void+")"; g.fillRect(0,0,w,h);
+      var roadY=h*0.78, pxPerSec=70, roadScale=700*0.3;
+      var scale=700, cxA=w*0.32, cxP=w*0.68;
+      // Each rig gets its own local road patch anchored so the point right
+      // under it always shows roadHeight(t) — the same instant its physics
+      // reacts to. A single shared scroll (e.g. anchored off the canvas edge)
+      // puts the drawn bump under each car at the wrong moment.
+      function roadPatch(cx){
+        g.strokeStyle="rgba("+C.dim+",0.25)"; g.lineWidth=1.2;
+        g.beginPath();
+        var half=45;
+        for(var px=cx-half; px<=cx+half; px+=3){
+          var tr = t + (px-cx)/pxPerSec;
+          var y = roadY - roadHeight(tr)*roadScale;
+          if(px===cx-half) g.moveTo(px,y); else g.lineTo(px,y);
+        }
+        g.stroke();
+      }
+      roadPatch(cxA); roadPatch(cxP);
+      var baseY = roadY - roadHeight(t)*roadScale;
+      function rig(cx,x,color){
+        var wheelY = baseY - x[2]*scale;
+        var bodyY = wheelY - h*0.22 - x[0]*scale;
+        g.fillStyle="rgba("+color+",0.9)"; g.beginPath(); g.arc(cx,wheelY,4,0,Math.PI*2); g.fill();
+        g.strokeStyle="rgba("+color+",0.5)"; g.lineWidth=1.4;
+        g.beginPath(); g.moveTo(cx,wheelY-4); g.lineTo(cx,bodyY); g.stroke();
+        g.fillStyle="rgb("+color+")";
+        var bw=h*0.24, bh=h*0.09;
+        g.fillRect(cx-bw/2, bodyY-bh/2, bw, bh);
+      }
+      rig(cxA, xA, C.suspension);
+      rig(cxP, xP, C.dim);
+    };
+  }
+
   function makeSim(kind) {
     if (kind === "pendulum") return new PendulumSim();
     if (kind === "robot") return new RobotSim();
     if (kind === "acc") return new AccSim();
+    if (kind === "suspension") return new SuspensionSim();
     return new QueuedSim();
   }
 

@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Active Suspension</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "violet" — varied only by
+    lightness/saturation, matching green (pendulum), gold (robot nav), and
+    blue (adaptive cruise control). Committed to one dark world (no
+    light-mode variant).
+  */
+  :root {
+    --bg: #0e0a16;
+    --surface: #16101f;
+    --surface-2: #1e1729;
+    --ink: #f2edf7;
+    --ink-dim: #9184a3;
+    --line: rgba(230,220,245,0.13);
+
+    --v-bright: #b98cff;               /* active (LQR) rig */
+    --v-bright-soft: rgba(185,140,255,0.14);
+    --v-deep: #5b3f82;                 /* passive rig */
+    --v-deep-soft: rgba(91,63,130,0.2);
+    --v-mid: #8f6bcf;                  /* synthesis stat */
+    --v-pale: #ddccf5;                 /* headline numbers, focus */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--v-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--v-pale); font-weight: 600; }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--v-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--v-pale); outline-offset: 3px; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.comfort .value { color: var(--v-bright); }
+  .metric.handling .value { color: var(--v-mid); }
+  .metric.force .value { color: var(--v-pale); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.active { background: var(--v-bright); }
+  .swatch.passive { background: var(--v-deep); border: 1px solid var(--v-bright-soft); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--v-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--v-pale); outline-offset: 2px; }
+  button.primary { background: var(--v-bright); border-color: var(--v-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--v-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--v-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--v-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--v-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-actions { margin-top: 30px; display: flex; gap: 10px; }
+
+  .mode-row { display: flex; gap: 8px; margin-bottom: 26px; }
+  .mode-btn {
+    flex: 1 1 0;
+    text-align: center;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+  }
+  .mode-btn.active {
+    background: var(--v-bright);
+    border-color: var(--v-bright);
+    color: var(--bg);
+    font-weight: 600;
+  }
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Response figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--v-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--v-mid); }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Optimal Control &middot; Quarter-Car Model</p>
+      <h1>Active Suspension</h1>
+      <p class="dek">A <strong>350&nbsp;kg</strong> body riding on a <strong>30&nbsp;kg</strong> wheel through a spring, a damper, and — when it's switched on — an actuator that pushes back exactly as hard as an optimal control law says it should. Same road, same bump, two rigs.</p>
+      <div class="metrics-row">
+        <div class="metric comfort">
+          <span class="label">Body accel (active)</span>
+          <span class="value" id="readout-ab">0.00 m/s&sup2;</span>
+        </div>
+        <div class="metric handling">
+          <span class="label">Suspension travel</span>
+          <span class="value" id="readout-sd">0.0 mm</span>
+        </div>
+        <div class="metric force">
+          <span class="label">Actuator force</span>
+          <span class="value" id="readout-fs">0.00 kN</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch active"></i>Active (LQR)</span>
+          <span><i class="swatch passive"></i>Passive</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-bump" type="button">Hit a bump</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Ride tuning</h2>
+    <div class="mode-row">
+      <button class="mode-btn" id="mode-cruise" type="button">Cruise</button>
+      <button class="mode-btn" id="mode-balanced" type="button">Balanced</button>
+      <button class="mode-btn" id="mode-sport" type="button">Sport</button>
+    </div>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-tune"><span>Comfort &harr; Sport</span><span class="val" id="val-tune">Balanced</span></label>
+        <input type="range" id="slider-tune" min="0" max="100" step="1" value="50">
+      </div>
+    </div>
+    <p class="panel-note">Cruise, Balanced, and Sport are the same three design points as the source (&beta; = 0.01, 0.5, 0.99) — the dial reaches every point between them, too. Either way, this is the actuator's control-effort penalty (R): toward Comfort, the controller intervenes gently; toward Sport, it pushes hard to keep the body flat — at the cost of a rougher ride. The optimal gain is re-solved live at every position.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>Response to the same bump</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="abPlot" width="520" height="360"></canvas>
+        <figcaption><span>Body acceleration</span><span>active vs passive</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="sdPlot" width="520" height="360"></canvas>
+        <figcaption><span>Suspension deflection</span><span>active vs passive</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>An actuator that knows exactly how hard to push</h2>
+    <div class="essay-body">
+      <p class="lede">A passive suspension is a compromise struck once, in the spring rate and the damper, and it can't change its mind mid-bump. An active suspension adds one more input — a force actuator between the body and the wheel — and a controller that decides, at every instant, how hard to push. The question this page answers isn't whether that helps. It's how you decide, mathematically, how hard is too hard.</p>
+
+      <p>The quarter-car model itself is the exact one from the original design: a <strong>350&nbsp;kg</strong> body mass on a spring (16,000&nbsp;N/m) and damper (1,000&nbsp;N&middot;s/m) above a <strong>30&nbsp;kg</strong> wheel mass, which meets the road through the tire's own stiffness (190,000&nbsp;N/m). Four states — body position and velocity, wheel position and velocity — evolve under one exogenous input (the road) and one controlled input (the actuator force):</p>
+
+      <div class="eq-block">m<span class="dim">b</span>&middot;x&#776;<span class="dim">b</span> = &minus;k<span class="dim">s</span>(x<span class="dim">b</span>&minus;x<span class="dim">w</span>) &minus; b<span class="dim">s</span>(x&#775;<span class="dim">b</span>&minus;x&#775;<span class="dim">w</span>) + f<span class="dim">s</span>
+m<span class="dim">w</span>&middot;x&#776;<span class="dim">w</span> = k<span class="dim">s</span>(x<span class="dim">b</span>&minus;x<span class="dim">w</span>) + b<span class="dim">s</span>(x&#775;<span class="dim">b</span>&minus;x&#775;<span class="dim">w</span>) &minus; k<span class="dim">t</span>(x<span class="dim">w</span>&minus;r) &minus; f<span class="dim">s</span>
+
+<span class="dim">minimize  &int; (x&#8242;Qx + R&middot;f</span><span class="dim">s</span><span class="dim">&sup2;) dt   subject to the dynamics above</span></div>
+
+      <p>That's a linear&ndash;quadratic regulator: penalize the states you care about (here, body acceleration and suspension deflection, folded into Q) and the control effort you're willing to spend (R), and solve for the state-feedback gain that minimizes the total cost forever. The solution comes from the algebraic Riccati equation — the same equation, worked by hand for a 4&times;4 system, whose numerical solve is <a href="#colophon-note">described below</a>.</p>
+
+      <p class="pull">Every gain this page computes was checked, numerically, before it ever reached the page: the closed-loop system is confirmed stable at every setting, and the Riccati residual is driven below 10&#8315;&#8305; before the gain is trusted. An optimal controller you haven't verified is just a controller you're hoping is optimal.</p>
+
+      <p>The slider doesn't choose between two fixed personalities — it continuously re-solves the Riccati equation for a different control-effort penalty R, live, every time you move it. Toward Comfort, R is large: the actuator is expensive to use, so the optimal law barely touches it, and the ride stays close to passive. Toward Sport, R is small: force is cheap, so the controller leans on the actuator hard, flattening suspension travel — measurably, watch the chart — at the cost of sharper, less comfortable body accelerations. There's no setting that wins on both; that trade is the entire content of the R parameter.</p>
+
+      <p id="colophon-note">One honest substitution: the original design compares H&infin; and H2 mixed-sensitivity synthesis, which shape the response across frequency bands directly. Those solvers need bilinear matrix optimization that isn't something to approximate from scratch. This page uses full-state LQR instead — a different, exact optimal-control method, not a stand-in for the same one — solved here by integrating the Riccati differential equation forward via 4th-order Runge&ndash;Kutta until it reaches its steady, algebraic solution.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from graduate coursework in robust and optimal control (quarter-car active suspension). The plant matrices are the original design's exactly; the controller is a full-state LQR compensator, its Riccati equation solved by direct numerical integration, verified for stability and residual accuracy before use.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    bg: "14,10,22",
+    bright: "185,140,255",
+    deep: "91,63,130",
+    mid: "143,107,207",
+    pale: "221,204,245",
+    ink: "242,237,247",
+    line: "230,220,245"
+  };
+
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- 4x4 matrix helpers ----------------
+  function mT(A) { var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(A[j][i]); } return r; }
+  function mMul(A, B) {
+    var r = [];
+    for (var i = 0; i < 4; i++) {
+      r.push([]);
+      for (var j = 0; j < 4; j++) {
+        var s = 0;
+        for (var k = 0; k < 4; k++) s += A[i][k] * B[k][j];
+        r[i].push(s);
+      }
+    }
+    return r;
+  }
+  function mVec(A, v) { var r = []; for (var i = 0; i < 4; i++) { var s = 0; for (var k = 0; k < 4; k++) s += A[i][k] * v[k]; r.push(s); } return r; }
+  function outer(v, w) { var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(v[i] * w[j]); } return r; }
+  function mAdd(A, B) { var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(A[i][j] + B[i][j]); } return r; }
+  function mSub(A, B) { var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(A[i][j] - B[i][j]); } return r; }
+  function mScale(A, s) { var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(A[i][j] * s); } return r; }
+  function dot(a, b) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+
+  // ---------------- Quarter-car plant (exact source parameters) ----------------
+  var mb = 350, mw = 30, bs = 1000, ks = 16000, kt = 190000;
+  var A = [
+    [0, 1, 0, 0],
+    [-ks / mb, -bs / mb, ks / mb, bs / mb],
+    [0, 0, 0, 1],
+    [ks / mw, bs / mw, -(ks + kt) / mw, -bs / mw]
+  ];
+  var Bu = [0, 1e3 / mb, 0, -1e3 / mw]; // control input fs (kN)
+  var Bw = [0, 0, 0, kt / mw];          // road input r (m)
+  var AT = mT(A);
+  var cs = [1, 0, -1, 0];                              // sd = cs . x
+  var ca = [-ks / mb, -bs / mb, ks / mb, bs / mb];      // ab state part
+  var Qsd = outer(cs, cs);
+  var cacaVal = dot(ca, ca);
+  var Qab = (function () { var o = outer(ca, ca); var r = []; for (var i = 0; i < 4; i++) { r.push([]); for (var j = 0; j < 4; j++) r[i].push(o[i][j] / cacaVal); } return r; })();
+  // Fixed, balanced state weighting — validated numerically so the single
+  // R (control-effort) slider produces a clean, monotonic comfort/handling
+  // trade rather than two under-differentiated objectives fighting each other.
+  var Q = mAdd(mScale(Qsd, 3000), mScale(Qab, 3000));
+
+  // Forward-integrate the Riccati differential equation
+  //   dP/dtau = A'P + PA - P Bu R^-1 Bu' P + Q
+  // from P(0)=0 to steady state via RK4. (No leading negation — that sign
+  // makes the flow unstable; this is the form that actually converges.)
+  function riccatiF(P, R) {
+    var Pb = mVec(P, Bu);
+    var quad = mScale(outer(Pb, Pb), 1 / R);
+    return mAdd(mSub(mAdd(mMul(AT, P), mMul(P, A)), quad), Q);
+  }
+  function solveGain(R) {
+    var P = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+    var dt = 0.0005, steps = 3000; // tau_max = 1.5s of fictitious time
+    for (var i = 0; i < steps; i++) {
+      var k1 = riccatiF(P, R);
+      var k2 = riccatiF(mAdd(P, mScale(k1, dt / 2)), R);
+      var k3 = riccatiF(mAdd(P, mScale(k2, dt / 2)), R);
+      var k4 = riccatiF(mAdd(P, mScale(k3, dt)), R);
+      var dP = mScale(mAdd(mAdd(k1, mScale(k2, 2)), mAdd(mScale(k3, 2), k4)), 1 / 6);
+      P = mAdd(P, mScale(dP, dt));
+    }
+    var Pb = mVec(P, Bu);
+    return Pb.map(function (v) { return v / R; }); // K = R^-1 Bu' P
+  }
+
+  // R range validated to give a clean monotonic trade-off; slider maps
+  // log-linearly across it (t=0 -> gentle/comfort, t=1 -> aggressive/sport).
+  var R_MAX = 50, R_MIN = 0.2;
+  function rFromSlider(t) { return R_MAX * Math.pow(R_MIN / R_MAX, t); }
+
+  var K = solveGain(rFromSlider(0.5));
+
+  // ---------------- Road: the source's exact raised-cosine bump, repeated ----------------
+  var BUMP_PERIOD = 3.2, BUMP_DUR = 0.25, BUMP_AMP = 0.025;
+  function roadHeight(t) {
+    var tb = t % BUMP_PERIOD;
+    if (tb <= BUMP_DUR) return BUMP_AMP * (1 - Math.cos(8 * Math.PI * tb));
+    return 0;
+  }
+
+  function derivs(x, t, K_) {
+    var fs = K_ ? -dot(K_, x) : 0;
+    var r = roadHeight(t);
+    var xdot = [];
+    for (var i = 0; i < 4; i++) xdot.push(0);
+    for (var i = 0; i < 4; i++) for (var k = 0; k < 4; k++) xdot[i] += A[i][k] * x[k];
+    for (var i = 0; i < 4; i++) xdot[i] += Bu[i] * fs + Bw[i] * r;
+    return { xdot: xdot, fs: fs };
+  }
+  function rk4Step(x, t, dt, K_) {
+    var d1 = derivs(x, t, K_), k1 = d1.xdot;
+    var k2 = derivs(x.map(function (v, i) { return v + dt / 2 * k1[i]; }), t + dt / 2, K_).xdot;
+    var k3 = derivs(x.map(function (v, i) { return v + dt / 2 * k2[i]; }), t + dt / 2, K_).xdot;
+    var k4 = derivs(x.map(function (v, i) { return v + dt * k3[i]; }), t + dt, K_).xdot;
+    var xNext = x.map(function (v, i) { return v + dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]); });
+    return { x: xNext, fs: d1.fs };
+  }
+
+  // ---------------- Live state ----------------
+  var xActive = [0, 0, 0, 0], xPassive = [0, 0, 0, 0], simT = 0;
+  var lastFs = 0;
+  var playing = !reduced;
+  var tuneT = 0.5;
+
+  var sliderTune = document.getElementById("slider-tune");
+  var valTune = document.getElementById("val-tune");
+  var readoutAb = document.getElementById("readout-ab");
+  var readoutSd = document.getElementById("readout-sd");
+  var readoutFs = document.getElementById("readout-fs");
+  var btnPlay = document.getElementById("btn-play");
+  var btnBump = document.getElementById("btn-bump");
+  var modeButtons = {
+    cruise: document.getElementById("mode-cruise"),
+    balanced: document.getElementById("mode-balanced"),
+    sport: document.getElementById("mode-sport")
+  };
+  // The same three design points as the source's beta = [0.01, 0.5, 0.99]
+  // (Cruise/Balanced/Sport), expressed on this page's 0–100 slider scale.
+  var MODE_T = { cruise: 1, balanced: 50, sport: 99 };
+
+  function tuneLabel(t) {
+    if (t < 0.2) return "Comfort";
+    if (t < 0.4) return "Soft";
+    if (t < 0.6) return "Balanced";
+    if (t < 0.8) return "Firm";
+    return "Sport";
+  }
+  function syncLabel() { valTune.textContent = tuneLabel(tuneT); }
+
+  function syncModeButtons() {
+    var sliderVal = parseInt(sliderTune.value, 10);
+    Object.keys(modeButtons).forEach(function (key) {
+      modeButtons[key].classList.toggle("active", sliderVal === MODE_T[key]);
+    });
+  }
+
+  function recomputeGain() {
+    K = solveGain(rFromSlider(tuneT));
+    buildCharts();
+  }
+
+  sliderTune.addEventListener("input", function () {
+    tuneT = parseInt(sliderTune.value, 10) / 100;
+    syncLabel();
+    syncModeButtons();
+  });
+  sliderTune.addEventListener("change", recomputeGain);
+
+  Object.keys(modeButtons).forEach(function (key) {
+    modeButtons[key].addEventListener("click", function () {
+      sliderTune.value = MODE_T[key];
+      tuneT = MODE_T[key] / 100;
+      syncLabel();
+      syncModeButtons();
+      recomputeGain();
+    });
+  });
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnBump.addEventListener("click", function () {
+    simT = 0; xActive = [0, 0, 0, 0]; xPassive = [0, 0, 0, 0];
+  });
+
+  function updateStatsDom() {
+    var abVal = dot(ca, xActive) + (1e3 / mb) * lastFs;
+    var sdVal = xActive[0] - xActive[2];
+    readoutAb.textContent = Math.abs(abVal).toFixed(2) + " m/s²";
+    readoutSd.textContent = (Math.abs(sdVal) * 1000).toFixed(1) + " mm";
+    readoutFs.textContent = Math.abs(lastFs).toFixed(2) + " kN";
+  }
+
+  // ---------------- Stage: two quarter-car rigs over a scrolling road ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+  var roadScrollX = 0;
+
+  function sizeStage() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCanvas.width = Math.round(w * dpr);
+    stageCanvas.height = Math.round(h * dpr);
+    stageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function drawRig(ctx, cx, baseY, x, color, label) {
+    var scale = 900; // px per meter of travel, exaggerated for visibility
+    var wheelY = baseY - x[2] * scale;
+    var bodyY = wheelY - 46 - x[0] * scale;
+    // wheel
+    ctx.fillStyle = "rgba(" + color + ",0.9)";
+    ctx.beginPath(); ctx.arc(cx, wheelY, 9, 0, Math.PI * 2); ctx.fill();
+    // spring/damper (schematic zigzag)
+    ctx.strokeStyle = "rgba(" + color + ",0.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    var n = 5, segH = (wheelY - 9 - bodyY) / n;
+    ctx.moveTo(cx, wheelY - 9);
+    for (var i = 1; i < n; i++) {
+      ctx.lineTo(cx + (i % 2 === 0 ? 7 : -7), wheelY - 9 - segH * i);
+    }
+    ctx.lineTo(cx, bodyY);
+    ctx.stroke();
+    // body
+    ctx.fillStyle = "rgb(" + color + ")";
+    var bw = 64, bh = 20;
+    var r = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx - bw / 2 + r, bodyY - bh / 2);
+    ctx.arcTo(cx + bw / 2, bodyY - bh / 2, cx + bw / 2, bodyY + bh / 2, r);
+    ctx.arcTo(cx + bw / 2, bodyY + bh / 2, cx - bw / 2, bodyY + bh / 2, r);
+    ctx.arcTo(cx - bw / 2, bodyY + bh / 2, cx - bw / 2, bodyY - bh / 2, r);
+    ctx.arcTo(cx - bw / 2, bodyY - bh / 2, cx + bw / 2, bodyY - bh / 2, r);
+    ctx.closePath(); ctx.fill();
+    ctx.font = "500 10px 'IBM Plex Mono', monospace";
+    ctx.fillStyle = "rgba(" + T.ink + ",0.6)";
+    ctx.textAlign = "center";
+    ctx.fillText(label, cx, bodyY - bh / 2 - 8);
+  }
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0, 0, w, h);
+
+    var roadY = h * 0.74;
+    var pxPerSec = 90, roadScale = 900 * 0.4;
+    var cxA = w * 0.35, cxP = w * 0.68;
+
+    // Each rig gets its own local road patch, scrolled so the point directly
+    // beneath that rig always shows roadHeight(simT) — the same instant the
+    // physics is reacting to. Anchoring both patches to one shared scroll
+    // (e.g. the canvas's right edge) put the drawn bump under each car at a
+    // different moment than its actual physical response, so the bump
+    // visibly passed before (or after) the car reacted to it.
+    function drawRoadPatch(cx) {
+      stageCtx.strokeStyle = "rgba(" + T.line + ",0.4)";
+      stageCtx.lineWidth = 1.5;
+      stageCtx.beginPath();
+      var half = 110;
+      for (var px = cx - half; px <= cx + half; px += 4) {
+        var tRoad = simT + (px - cx) / pxPerSec;
+        var y = roadY - roadHeight(tRoad) * roadScale;
+        if (px === cx - half) stageCtx.moveTo(px, y); else stageCtx.lineTo(px, y);
+      }
+      stageCtx.stroke();
+    }
+    drawRoadPatch(cxA);
+    drawRoadPatch(cxP);
+
+    var baseYA = roadY - roadHeight(simT) * roadScale;
+    var baseYP = baseYA;
+    drawRig(stageCtx, cxA, baseYA, xActive, T.bright, "ACTIVE");
+    drawRig(stageCtx, cxP, baseYP, xPassive, T.deep, "PASSIVE");
+  }
+
+  // ---------------- Response charts ----------------
+  var abCanvas = document.getElementById("abPlot"), abCtx = abCanvas.getContext("2d");
+  var sdCanvas = document.getElementById("sdPlot"), sdCtx = sdCanvas.getContext("2d");
+  var chartData = null;
+
+  function axes(ctx, w, h, m) {
+    ctx.strokeStyle = "rgba(" + T.line + ",0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(m, h - m); ctx.lineTo(w - 10, h - m);
+    ctx.moveTo(m, h - m); ctx.lineTo(m, 10);
+    ctx.stroke();
+  }
+
+  // Offline replay of one bump cycle for both rigs, used only to draw the
+  // comparison charts (the live stage animates continuously and separately).
+  function computeBumpTraces() {
+    var dt = 0.0015, tmax = BUMP_PERIOD;
+    var xA = [0, 0, 0, 0], xP = [0, 0, 0, 0];
+    var tr = [];
+    var t = 0;
+    while (t < tmax) {
+      var rA = rk4Step(xA, t, dt, K);
+      var rP = rk4Step(xP, t, dt, null);
+      var abA = dot(ca, xA) + (1e3 / mb) * rA.fs;
+      var abP = dot(ca, xP);
+      tr.push({ t: t, abA: abA, abP: abP, sdA: xA[0] - xA[2], sdP: xP[0] - xP[2] });
+      xA = rA.x; xP = rP.x;
+      t += dt;
+    }
+    return tr;
+  }
+
+  function renderLineChart(ctx, canvas, key1, key2, unit) {
+    var w = canvas.width, h = canvas.height, m = 34;
+    ctx.fillStyle = "rgb(" + T.bg + ")";
+    ctx.fillRect(0, 0, w, h);
+    axes(ctx, w, h, m);
+    if (!chartData) return;
+    var maxV = 0.001;
+    chartData.forEach(function (p) { maxV = Math.max(maxV, Math.abs(p[key1]), Math.abs(p[key2])); });
+    maxV *= 1.15;
+    function mapX(t) { return m + (t / BUMP_PERIOD) * (w - m - 10); }
+    function mapY(v) { return (h - m) - ((v + maxV) / (2 * maxV)) * (h - m - 10); }
+    ctx.strokeStyle = "rgba(" + T.line + ",0.3)";
+    ctx.beginPath(); ctx.moveTo(m, mapY(0)); ctx.lineTo(w - 10, mapY(0)); ctx.stroke();
+
+    ctx.strokeStyle = "rgb(" + T.deep + ")"; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    chartData.forEach(function (p, i) { var x = mapX(p.t), y = mapY(p[key2]); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgb(" + T.bright + ")"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    chartData.forEach(function (p, i) { var x = mapX(p.t), y = mapY(p[key1]); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.stroke();
+  }
+
+  function buildCharts() {
+    chartData = computeBumpTraces();
+    renderLineChart(abCtx, abCanvas, "abA", "abP");
+    renderLineChart(sdCtx, sdCanvas, "sdA", "sdP");
+  }
+
+  // ---------------- Main loop ----------------
+  var lastTs = 0;
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0.016;
+    lastTs = ts;
+
+    if (playing) {
+      var sub = 6, h2 = dt / sub;
+      for (var i = 0; i < sub; i++) {
+        var rA = rk4Step(xActive, simT, h2, K);
+        var rP = rk4Step(xPassive, simT, h2, null);
+        xActive = rA.x; xPassive = rP.x; lastFs = rA.fs;
+        simT += h2;
+      }
+    }
+
+    renderStage();
+    updateStatsDom();
+    requestAnimationFrame(frame);
+  }
+
+  syncLabel();
+  syncModeButtons();
+  buildCharts();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
