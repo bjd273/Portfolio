@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aircraft Pitch Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /*
+    Single-hue identity: this project is "teal" — varied only by
+    lightness/saturation, matching green (pendulum), gold (robot nav), blue
+    (ACC), violet (suspension), and red (14-DOF vehicle). Committed to one
+    dark world (no light-mode variant).
+  */
+  :root {
+    --bg: #061616;
+    --surface: #0c1f1f;
+    --surface-2: #102828;
+    --ink: #eaf7f6;
+    --ink-dim: #7fa3a0;
+    --line: rgba(200,235,230,0.13);
+
+    --t-bright: #38e0d0;               /* closed loop (the design) */
+    --t-bright-soft: rgba(56,224,208,0.14);
+    --t-deep: #1a6b63;                 /* open loop (uncompensated) */
+    --t-mid: #5fc9bd;                  /* ideal model / synthesis */
+    --t-pale: #b9f0e8;                 /* headline numbers, focus */
+
+    --radius-card: 12px;
+    --radius-ui: 8px;
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; color: var(--ink); }
+  h1 { font-size: clamp(2.6rem, 5vw, 3.8rem); font-weight: 700; letter-spacing: -0.015em; }
+  h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 18px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--t-pale);
+    margin: 0 0 14px;
+  }
+
+  .dek { font-size: 1.08rem; color: var(--ink-dim); max-width: 48ch; margin: 18px 0 0; }
+  .dek strong { color: var(--t-pale); font-weight: 600; }
+
+  .backlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-bottom: 32px;
+    transition: color 0.15s ease;
+  }
+  .backlink:hover { color: var(--t-bright); }
+  .backlink:focus-visible { outline: 2px solid var(--t-pale); outline-offset: 3px; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(340px, 480px);
+    gap: 48px;
+    align-items: center;
+    padding-bottom: 52px;
+    border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
+
+  .hero-text { display: flex; flex-direction: column; }
+
+  .metrics-row { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 30px; font-family: var(--font-mono); }
+  .metric .label {
+    font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim); display: block; margin-bottom: 4px;
+  }
+  .metric .value { font-size: 1.3rem; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .metric.rate .value { color: var(--t-bright); }
+  .metric.elevator .value { color: var(--t-mid); }
+  .metric.err .value { color: var(--t-pale); }
+
+  .stage-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px; }
+  #stage-canvas-holder { position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  .stage-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+
+  .legend { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 0.74rem; color: var(--ink-dim); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .swatch.plane { background: var(--t-bright); }
+  .swatch.horizon { background: var(--t-deep); }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    font-family: var(--font-mono); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: var(--radius-ui); padding: 9px 15px; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--t-bright); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--t-pale); outline-offset: 2px; }
+  button.primary { background: var(--t-bright); border-color: var(--t-bright); color: var(--bg); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Controls panel ---------- */
+  .panel { padding: 44px 0; border-bottom: 1px solid var(--line); }
+
+  .sliders-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+
+  .field label {
+    display: flex; justify-content: space-between; font-family: var(--font-mono);
+    font-size: 0.78rem; color: var(--ink-dim); margin-bottom: 10px;
+  }
+  .field label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; margin: 0; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--t-bright); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--t-bright);
+    cursor: pointer; margin-top: -6px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%; background: var(--t-bright);
+    border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--t-bright); cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
+
+  /* ---------- Response figures ---------- */
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 28px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
+  figure canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+  figcaption { margin-top: 10px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--ink-dim); display: flex; justify-content: space-between; }
+
+  /* ---------- Essay ---------- */
+  .essay { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .essay-body { max-width: 66ch; }
+  .essay p { margin: 0 0 18px; color: var(--ink); }
+  .essay p.lede { font-size: 1.12rem; color: var(--ink-dim); }
+
+  .pull {
+    font-family: var(--font-display); font-weight: 600; font-size: 1.3rem; line-height: 1.5;
+    color: var(--ink); border-left: 3px solid var(--t-mid); padding-left: 22px; margin: 34px 0; max-width: 52ch;
+  }
+
+  .eq-block {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card);
+    padding: 22px 24px; margin: 26px 0; overflow-x: auto; font-family: var(--font-mono);
+    font-size: 0.86rem; color: var(--ink); line-height: 2; white-space: pre;
+  }
+  .eq-block .dim { color: var(--ink-dim); }
+
+  footer.colophon { padding-top: 40px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-dim); max-width: 60ch; }
+  footer.colophon a { color: var(--t-mid); }
+
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Robust Control &middot; Aircraft Pitch Dynamics</p>
+      <h1>Aircraft Pitch Control</h1>
+      <p class="dek">A NASA-model short-period pitch response, lightly damped on its own, tracking a <strong>&plusmn;15&deg;/s</strong> pitch-rate command through an elevator limited to <strong>&plusmn;20&deg;</strong> of travel. The controller has to hit the command without ever asking for more elevator than the airplane actually has.</p>
+      <div class="metrics-row">
+        <div class="metric rate">
+          <span class="label">Pitch rate</span>
+          <span class="value" id="readout-rate">0.0&deg;/s</span>
+        </div>
+        <div class="metric elevator">
+          <span class="label">Elevator</span>
+          <span class="value" id="readout-elevator">0.0&deg;</span>
+        </div>
+        <div class="metric err">
+          <span class="label">Tracking error</span>
+          <span class="value" id="readout-err">0.0&deg;/s</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage-canvas-holder"><canvas id="stage"></canvas></div>
+      <div class="stage-controls">
+        <div class="legend">
+          <span><i class="swatch plane"></i>Aircraft</span>
+          <span><i class="swatch horizon"></i>Horizon</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-play" class="primary" type="button">Pause</button>
+          <button id="btn-reset" type="button">Reset</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel controls-panel">
+    <h2>Controller tuning</h2>
+    <div class="sliders-grid">
+      <div class="field">
+        <label for="slider-tune"><span>Precise &harr; Gentle</span><span class="val" id="val-tune">Balanced</span></label>
+        <input type="range" id="slider-tune" min="0" max="100" step="1" value="50">
+      </div>
+    </div>
+    <p class="panel-note">This is the elevator's control-effort penalty (R), re-solved live: toward Precise, the controller commands whatever elevator it takes to hit the pitch rate quickly; toward Gentle, it holds back and accepts a slower, softer response.</p>
+  </section>
+
+  <section class="panel phase-section">
+    <h2>Step response to a 15&deg;/s command</h2>
+    <div class="phase-grid">
+      <figure>
+        <canvas id="ratePlot" width="520" height="360"></canvas>
+        <figcaption><span>Pitch rate</span><span>closed loop vs. ideal vs. open loop</span></figcaption>
+      </figure>
+      <figure>
+        <canvas id="elevPlot" width="520" height="360"></canvas>
+        <figcaption><span>Elevator command</span><span>closed loop, against the &plusmn;20&deg; limit</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <article class="essay">
+    <h2>Chasing a response shape, not just a number</h2>
+    <div class="essay-body">
+      <p class="lede">Left alone, this airplane's short-period pitch mode is lightly damped — the real damping ratio, from the actual model, comes out to about 0.42. That's the kind of mode a pilot feels as a wallow: it gets where it's going, but not cleanly. The point of a pitch-rate controller isn't just to reach a commanded rate; it's to get there with a damping ratio a pilot would actually want, without ever demanding more elevator deflection than the airplane has.</p>
+
+      <p>The plant here is the genuine article — a linearized short-period model, two states (angle of attack and pitch rate), driven through a real first-order actuator lag at 31.4&nbsp;rad/s, with elevator travel capped at the airplane's real &plusmn;20&deg; limit. The design target isn't an arbitrary shape either: it's the same plant, re-poled to a damping ratio of 0.8 at its own natural frequency — "the airplane, but better damped" — which is exactly the reference this page's controller is judged against.</p>
+
+      <div class="eq-block">plant:  x&#775; = Ax + B&delta;<span class="dim">e</span>,   x = [&alpha;, q],   &delta;&#775;<span class="dim">e</span> = &minus;31.4(&delta;<span class="dim">e</span> &minus; u)
+
+<span class="dim">natural frequency:  &omega;n &asymp; 7.10 rad/s      open-loop damping:  &zeta; &asymp; 0.42</span>
+<span class="dim">ideal model:  same plant, re-poled to &zeta; = 0.8 at the same &omega;n</span></div>
+
+      <p class="pull">The controller tracks the commanded rate almost exactly — by design, the integral state in its own equations guarantees zero steady-state error to a constant command. What it can't promise for free is elevator authority: push for a faster response and the elevator works harder to get there, right up against that &plusmn;20&deg; ceiling.</p>
+
+      <p>One honest substitution: the original design is an H&infin; mixed-sensitivity synthesis — four weighting filters (tracking error, control effort, sensor noise, elevator disturbance) shaping the loop directly in the frequency domain, solved by <code>hinfsyn</code>. That's a real optimization problem that needs its own specialized machinery, not something to approximate from scratch. This page uses full-state LQR with integral action instead — a different, exact optimal-control method, the same one already verified on the active-suspension page — tuned by a single control-effort penalty rather than four frequency-shaped weights. The qualitative story the original design explores — tighter tracking costs more high-frequency control effort — comes through the same way.</p>
+    </div>
+  </article>
+
+  <footer class="colophon">
+    Ported from graduate coursework in robust control (H&infin; loop-shaping for a NASA Generic Transport Model's short-period pitch dynamics). The plant, actuator, and elevator limit are the original design's exactly; the controller is LQR with integral action, its Riccati equation solved and verified the same way as the active-suspension page's, run continuously in-browser.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    bg: "6,22,22",
+    bright: "56,224,208",
+    deep: "26,107,99",
+    mid: "95,201,189",
+    pale: "185,240,232",
+    ink: "234,247,246",
+    line: "200,235,230"
+  };
+
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------------- 4x4 matrix helpers (LQR / Riccati) ----------------
+  function mT(M) { var n=M.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(M[j][i]);} return r; }
+  function mMul(A,B){ var n=A.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++){var s=0;for(var k=0;k<n;k++)s+=A[i][k]*B[k][j];r[i].push(s);}} return r; }
+  function mVec(A,v){ var n=A.length,r=[]; for(var i=0;i<n;i++){var s=0;for(var k=0;k<n;k++)s+=A[i][k]*v[k];r.push(s);} return r; }
+  function outer(v,w){ var n=v.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(v[i]*w[j]);} return r; }
+  function mAdd(A,B){ var n=A.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A[i][j]+B[i][j]);} return r; }
+  function mSub(A,B){ var n=A.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A[i][j]-B[i][j]);} return r; }
+  function mScale(A,s){ var n=A.length,r=[]; for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A[i][j]*s);} return r; }
+  function dot(a,b){ var s=0; for(var i=0;i<a.length;i++)s+=a[i]*b[i]; return s; }
+
+  // ---------------- Real extracted plant (NASA GTM short-period) ----------------
+  var actPole = 31.42;
+  var umax = 20 * Math.PI / 180;
+  var rmag = 0.2618; // 15 deg/s reference command
+
+  // Augmented state x = [alpha, q, deltaE, xi]; xi_dot = r - q (integral action)
+  var A = [
+    [-2.4714, 0.9514, -0.2501, 0],
+    [-43.9070, -3.4738, -44.9478, 0],
+    [0, 0, -actPole, 0],
+    [0, -1, 0, 0]
+  ];
+  var Bu = [0, 0, actPole, 0];
+  var Br = [0, 0, 0, 1];
+  var AT = mT(A);
+  var Q = [[1,0,0,0],[0,1,0,0],[0,0,0.01,0],[0,0,0,200]];
+
+  function riccatiF(P, R) {
+    var Pb = mVec(P, Bu);
+    var quad = mScale(outer(Pb, Pb), 1 / R);
+    return mAdd(mSub(mAdd(mMul(AT, P), mMul(P, A)), quad), Q);
+  }
+  function solveGain(R) {
+    var P = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+    var dt = 0.001, steps = 3000;
+    for (var i = 0; i < steps; i++) {
+      var k1 = riccatiF(P, R);
+      var k2 = riccatiF(mAdd(P, mScale(k1, dt/2)), R);
+      var k3 = riccatiF(mAdd(P, mScale(k2, dt/2)), R);
+      var k4 = riccatiF(mAdd(P, mScale(k3, dt)), R);
+      var dP = mScale(mAdd(mAdd(k1, mScale(k2,2)), mAdd(mScale(k3,2), k4)), 1/6);
+      P = mAdd(P, mScale(dP, dt));
+    }
+    var Pb = mVec(P, Bu);
+    return Pb.map(function (v) { return v / R; });
+  }
+  var R_MAX = 0.6, R_MIN = 0.006;
+  function rFromSlider(t) { return R_MAX * Math.pow(R_MIN / R_MAX, t); }
+  var K = solveGain(rFromSlider(0.5));
+
+  // ---------------- Reference command: a repeating +/- step ----------------
+  var CMD_PERIOD = 6;
+  function refCommand(t) { return (t % CMD_PERIOD) < CMD_PERIOD / 2 ? rmag : -rmag; }
+
+  function closedLoopDerivs(x, t, K_) {
+    var r = refCommand(t);
+    var uRaw = -dot(K_, x);
+    var u = Math.max(-umax, Math.min(umax, uRaw));
+    var xdot = [0,0,0,0];
+    for (var i=0;i<4;i++) for (var k=0;k<4;k++) xdot[i] += A[i][k]*x[k];
+    for (var i=0;i<4;i++) xdot[i] += Bu[i]*u + Br[i]*r;
+    return { xdot: xdot, u: u, r: r };
+  }
+  function rk4(x, t, dt, K_) {
+    var d1 = closedLoopDerivs(x, t, K_), k1 = d1.xdot;
+    var k2 = closedLoopDerivs(x.map(function(v,i){return v+dt/2*k1[i];}), t+dt/2, K_).xdot;
+    var k3 = closedLoopDerivs(x.map(function(v,i){return v+dt/2*k2[i];}), t+dt/2, K_).xdot;
+    var k4 = closedLoopDerivs(x.map(function(v,i){return v+dt*k3[i];}), t+dt, K_).xdot;
+    var xn = x.map(function(v,i){return v+dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);});
+    return { x: xn, u: d1.u, r: d1.r };
+  }
+
+  // ---------------- Live state ----------------
+  var x = [0,0,0,0], simT = 0, pitchAngle = 0;
+  var lastU = 0, lastR = rmag;
+  var playing = !reduced, tuneT = 0.5;
+
+  var sliderTune = document.getElementById("slider-tune");
+  var valTune = document.getElementById("val-tune");
+  var readoutRate = document.getElementById("readout-rate");
+  var readoutElevator = document.getElementById("readout-elevator");
+  var readoutErr = document.getElementById("readout-err");
+  var btnPlay = document.getElementById("btn-play");
+  var btnReset = document.getElementById("btn-reset");
+
+  function tuneLabel(t) {
+    if (t < 0.2) return "Precise";
+    if (t < 0.4) return "Firm";
+    if (t < 0.6) return "Balanced";
+    if (t < 0.8) return "Soft";
+    return "Gentle";
+  }
+  function syncLabel() { valTune.textContent = tuneLabel(tuneT); }
+  function recomputeGain() { K = solveGain(rFromSlider(tuneT)); buildCharts(); }
+
+  sliderTune.addEventListener("input", function () { tuneT = parseInt(sliderTune.value,10)/100; syncLabel(); });
+  sliderTune.addEventListener("change", recomputeGain);
+
+  btnPlay.addEventListener("click", function () {
+    playing = !playing;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+    btnPlay.classList.toggle("primary", playing);
+  });
+  btnReset.addEventListener("click", function () { x=[0,0,0,0]; simT=0; pitchAngle=0; });
+
+  function updateStatsDom() {
+    readoutRate.textContent = (x[1]*180/Math.PI).toFixed(1) + "°/s";
+    readoutElevator.textContent = (lastU*180/Math.PI).toFixed(1) + "°";
+    readoutErr.textContent = Math.abs((lastR - x[1])*180/Math.PI).toFixed(1) + "°/s";
+  }
+
+  // ---------------- Stage: pitching aircraft against a horizon ----------------
+  var stageHolder = document.getElementById("stage-canvas-holder");
+  var stageCanvas = document.getElementById("stage");
+  var stageCtx = stageCanvas.getContext("2d");
+  function sizeStage() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCanvas.width = Math.round(w*dpr); stageCanvas.height = Math.round(h*dpr);
+    stageCtx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(sizeStage).observe(stageHolder);
+  sizeStage();
+
+  function renderStage() {
+    var w = stageHolder.clientWidth, h = stageHolder.clientHeight;
+    stageCtx.fillStyle = "rgb(" + T.bg + ")";
+    stageCtx.fillRect(0,0,w,h);
+
+    var cx = w/2, cy = h/2;
+    var pitchPx = Math.max(-h*0.35, Math.min(h*0.35, pitchAngle * (h*0.9)));
+
+    // horizon line, tilts opposite as a simple "artificial horizon" feel
+    stageCtx.save();
+    stageCtx.translate(cx, cy + pitchPx);
+    stageCtx.strokeStyle = "rgba(" + T.deep + ",0.9)";
+    stageCtx.lineWidth = 2;
+    stageCtx.beginPath(); stageCtx.moveTo(-w, 0); stageCtx.lineTo(w, 0); stageCtx.stroke();
+    stageCtx.fillStyle = "rgba(" + T.deep + ",0.08)";
+    stageCtx.fillRect(-w, 0, 2*w, h);
+    stageCtx.restore();
+
+    // pitch ladder ticks
+    stageCtx.strokeStyle = "rgba(" + T.line + ",0.3)";
+    stageCtx.lineWidth = 1;
+    for (var d = -20; d <= 20; d += 10) {
+      if (d === 0) continue;
+      var yy = cy + pitchPx - d * (h*0.9/40);
+      stageCtx.beginPath(); stageCtx.moveTo(cx-24, yy); stageCtx.lineTo(cx+24, yy); stageCtx.stroke();
+    }
+
+    // aircraft glyph, fixed at center (pitch shown via horizon motion, like an attitude indicator)
+    stageCtx.fillStyle = "rgb(" + T.bright + ")";
+    var wing = 46, body = 10;
+    stageCtx.fillRect(cx - wing/2, cy - 2, wing, 4);
+    stageCtx.beginPath();
+    stageCtx.moveTo(cx, cy - body); stageCtx.lineTo(cx - 6, cy + body*0.6); stageCtx.lineTo(cx + 6, cy + body*0.6);
+    stageCtx.closePath(); stageCtx.fill();
+  }
+
+  // ---------------- Response charts ----------------
+  var rateCanvas = document.getElementById("ratePlot"), rateCtx = rateCanvas.getContext("2d");
+  var elevCanvas = document.getElementById("elevPlot"), elevCtx = elevCanvas.getContext("2d");
+  var chartData = null;
+
+  function axes(ctx, w, h, m) {
+    ctx.strokeStyle = "rgba(" + T.line + ",0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(m, h - m); ctx.lineTo(w - 10, h - m);
+    ctx.moveTo(m, 10); ctx.lineTo(m, h - 10);
+    ctx.stroke();
+  }
+
+  // Ideal model M = Gdamp*Act, and raw open-loop G, both driven directly by
+  // the step command (no feedback) — the same comparison the source plots,
+  // with the same sign flip it applies for a visually consistent chart.
+  var a0d = 50.358269119999996, a1d = 11.354169672292201;
+  var b0n = -100.10285222, b1n = -44.9478;
+  function idealDerivs(z, r) {
+    var de = z[0], z1 = z[1], z2 = z[2];
+    return [-actPole*(de-r), z2, -a0d*z1 - a1d*z2 + de];
+  }
+  function idealOutput(z) { return b0n*z[1] + b1n*z[2]; }
+  function rk4Ideal(z, r, dt) {
+    var k1=idealDerivs(z,r), k2=idealDerivs(z.map(function(v,i){return v+dt/2*k1[i];}),r);
+    var k3=idealDerivs(z.map(function(v,i){return v+dt/2*k2[i];}),r), k4=idealDerivs(z.map(function(v,i){return v+dt*k3[i];}),r);
+    return z.map(function(v,i){return v+dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);});
+  }
+  var A2 = [[-2.4714,0.9514],[-43.9070,-3.4738]], B2 = [-0.2501,-44.9478];
+  function openDerivs(z, u) { return [A2[0][0]*z[0]+A2[0][1]*z[1]+B2[0]*u, A2[1][0]*z[0]+A2[1][1]*z[1]+B2[1]*u]; }
+  function rk4Open(z, u, dt) {
+    var k1=openDerivs(z,u), k2=openDerivs([z[0]+dt/2*k1[0],z[1]+dt/2*k1[1]],u);
+    var k3=openDerivs([z[0]+dt/2*k2[0],z[1]+dt/2*k2[1]],u), k4=openDerivs([z[0]+dt*k3[0],z[1]+dt*k3[1]],u);
+    return [z[0]+dt/6*(k1[0]+2*k2[0]+2*k3[0]+k4[0]), z[1]+dt/6*(k1[1]+2*k2[1]+2*k3[1]+k4[1])];
+  }
+
+  function computeStepTraces() {
+    var dt = 0.002, tmax = 3.0;
+    var xc = [0,0,0,0], zi = [0,0,0], zo = [0,0];
+    var out = [];
+    var t = 0;
+    while (t < tmax) {
+      var res = rk4(xc, t, dt, K); xc = res.x;
+      zi = rk4Ideal(zi, rmag, dt);
+      zo = rk4Open(zo, rmag, dt);
+      t += dt;
+      out.push({
+        t: t,
+        qc: xc[1] * 180/Math.PI,
+        qi: -idealOutput(zi) * 180/Math.PI,
+        qo: -zo[1] * 180/Math.PI,
+        u: res.u * 180/Math.PI
+      });
+    }
+    return out;
+  }
+
+  function renderRateChart() {
+    var w = rateCanvas.width, h = rateCanvas.height, m = 34;
+    rateCtx.fillStyle = "rgb(" + T.bg + ")"; rateCtx.fillRect(0,0,w,h);
+    axes(rateCtx, w, h, m);
+    if (!chartData) return;
+    var maxV = 5;
+    chartData.forEach(function(p){ maxV = Math.max(maxV, Math.abs(p.qc), Math.abs(p.qi), Math.abs(p.qo)); });
+    maxV *= 1.15;
+    function mapX(t){ return m + (t/3.0)*(w-m-10); }
+    function mapY(v){ return (h-m) - (v/maxV)*(h-m-10); }
+    function line(key, color, width) {
+      rateCtx.strokeStyle = "rgb(" + color + ")"; rateCtx.lineWidth = width;
+      rateCtx.beginPath();
+      chartData.forEach(function(p,i){ var xx=mapX(p.t), yy=mapY(p[key]); if(i===0) rateCtx.moveTo(xx,yy); else rateCtx.lineTo(xx,yy); });
+      rateCtx.stroke();
+    }
+    line("qo", T.deep, 1.4);
+    line("qi", T.mid, 1.6);
+    line("qc", T.bright, 2.2);
+  }
+  function renderElevChart() {
+    var w = elevCanvas.width, h = elevCanvas.height, m = 34;
+    elevCtx.fillStyle = "rgb(" + T.bg + ")"; elevCtx.fillRect(0,0,w,h);
+    axes(elevCtx, w, h, m);
+    if (!chartData) return;
+    var maxV = 22;
+    function mapX(t){ return m + (t/3.0)*(w-m-10); }
+    function mapY(v){ return (h-m) - ((v+maxV)/(2*maxV))*(h-m-10); }
+    var limDeg = umax*180/Math.PI;
+    elevCtx.strokeStyle = "rgba(" + T.pale + ",0.35)";
+    elevCtx.setLineDash([3,5]); elevCtx.lineWidth = 1;
+    elevCtx.beginPath(); elevCtx.moveTo(m, mapY(limDeg)); elevCtx.lineTo(w-10, mapY(limDeg)); elevCtx.stroke();
+    elevCtx.beginPath(); elevCtx.moveTo(m, mapY(-limDeg)); elevCtx.lineTo(w-10, mapY(-limDeg)); elevCtx.stroke();
+    elevCtx.setLineDash([]);
+    elevCtx.strokeStyle = "rgb(" + T.bright + ")"; elevCtx.lineWidth = 2;
+    elevCtx.beginPath();
+    chartData.forEach(function(p,i){ var xx=mapX(p.t), yy=mapY(p.u); if(i===0) elevCtx.moveTo(xx,yy); else elevCtx.lineTo(xx,yy); });
+    elevCtx.stroke();
+  }
+  function buildCharts() {
+    chartData = computeStepTraces();
+    renderRateChart();
+    renderElevChart();
+  }
+
+  // ---------------- Main loop ----------------
+  var lastTs = 0;
+  function frame(ts) {
+    var dt = lastTs ? Math.min((ts-lastTs)/1000, 0.05) : 0.016;
+    lastTs = ts;
+    if (playing) {
+      var sub = 4, h2 = dt/sub;
+      for (var i=0;i<sub;i++) {
+        var res = rk4(x, simT, h2, K);
+        x = res.x; lastU = res.u; lastR = res.r;
+        pitchAngle += x[1]*h2;
+        simT += h2;
+      }
+    }
+    renderStage();
+    updateStatsDom();
+    requestAnimationFrame(frame);
+  }
+
+  syncLabel();
+  buildCharts();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

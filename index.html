@@ -257,6 +257,7 @@
     acc: "63,169,255",
     suspension: "185,140,255",
     veh14: "255,92,92",
+    aircraft: "56,224,208",
     queued: "90,97,105"
   };
 
@@ -297,10 +298,11 @@
       meta: ["LQR", "Riccati equation", "Quarter-car"]
     },
     {
-      id: "aircraft", title: "Aircraft Pitch Control", kind: "Queued",
-      rgb: C.queued, hex: "#5a6169", url: null, sim: "queued",
-      blurb: "Mixed-sensitivity H∞ design on a short-period longitudinal model, iterated across six weighting-function revisions with the reasoning kept in the loop.",
-      meta: ["H∞ synthesis", "Weight design", "Flight dynamics"]
+      id: "aircraft", title: "Aircraft Pitch Control", kind: "Live",
+      rgb: C.aircraft, hex: "#38e0d0",
+      url: "projects/aircraft-pitch.html", sim: "aircraft",
+      blurb: "A lightly-damped short-period pitch response tracking a real ±15°/s command through a real ±20° elevator limit — LQR with integral action, its Riccati equation solved and verified live in-browser.",
+      meta: ["LQR + integral action", "Riccati equation", "Flight dynamics"]
     },
     {
       id: "solar", title: "Solar Racing Vehicle", kind: "Queued",
@@ -824,12 +826,80 @@
     };
   }
 
+  // Aircraft Pitch Control — same LQR-with-integral-action design and real
+  // plant as the full project page, tracking the same repeating +/-15 deg/s
+  // command for this small preview.
+  function AircraftSim() {
+    var actPole=31.42, umax=20*Math.PI/180, rmag=0.2618;
+    var A=[[-2.4714,0.9514,-0.2501,0],[-43.9070,-3.4738,-44.9478,0],[0,0,-actPole,0],[0,-1,0,0]];
+    var Bu=[0,0,actPole,0], Br=[0,0,0,1];
+    function mT(M){var n=M.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(M[j][i]);}return r;}
+    function mMul(A_,B_){var n=A_.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++){var s=0;for(var k=0;k<n;k++)s+=A_[i][k]*B_[k][j];r[i].push(s);}}return r;}
+    function mVec(A_,v){var n=A_.length,r=[];for(var i=0;i<n;i++){var s=0;for(var k=0;k<n;k++)s+=A_[i][k]*v[k];r.push(s);}return r;}
+    function outer(v,w){var n=v.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(v[i]*w[j]);}return r;}
+    function mAdd(A_,B_){var n=A_.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A_[i][j]+B_[i][j]);}return r;}
+    function mSub(A_,B_){var n=A_.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A_[i][j]-B_[i][j]);}return r;}
+    function mScale(A_,s){var n=A_.length,r=[];for(var i=0;i<n;i++){r.push([]);for(var j=0;j<n;j++)r[i].push(A_[i][j]*s);}return r;}
+    function dot(a,b){var s=0;for(var i=0;i<a.length;i++)s+=a[i]*b[i];return s;}
+    var AT=mT(A);
+    var Q=[[1,0,0,0],[0,1,0,0],[0,0,0.01,0],[0,0,0,200]];
+    function riccatiF(P,R){var Pb=mVec(P,Bu);var quad=mScale(outer(Pb,Pb),1/R);return mAdd(mSub(mAdd(mMul(AT,P),mMul(P,A)),quad),Q);}
+    function solveGain(R){
+      var P=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+      var dt=0.001, steps=3000;
+      for(var i=0;i<steps;i++){
+        var k1=riccatiF(P,R), k2=riccatiF(mAdd(P,mScale(k1,dt/2)),R);
+        var k3=riccatiF(mAdd(P,mScale(k2,dt/2)),R), k4=riccatiF(mAdd(P,mScale(k3,dt)),R);
+        P=mAdd(P,mScale(mScale(mAdd(mAdd(k1,mScale(k2,2)),mAdd(mScale(k3,2),k4)),1/6),dt));
+      }
+      var Pb=mVec(P,Bu); return Pb.map(function(v){return v/R;});
+    }
+    var K = solveGain(0.05);
+    var CMD_PERIOD=6;
+    function refCommand(t){ return (t%CMD_PERIOD) < CMD_PERIOD/2 ? rmag : -rmag; }
+    function deriv(x,t){
+      var r = refCommand(t);
+      var uRaw = -dot(K,x);
+      var u = Math.max(-umax, Math.min(umax, uRaw));
+      var xdot=[0,0,0,0];
+      for(var i=0;i<4;i++) for(var k=0;k<4;k++) xdot[i]+=A[i][k]*x[k];
+      for(var i=0;i<4;i++) xdot[i]+=Bu[i]*u+Br[i]*r;
+      return xdot;
+    }
+    function rk4(x,t,dt){
+      var k1=deriv(x,t);
+      var k2=deriv(x.map(function(v,i){return v+dt/2*k1[i];}),t+dt/2);
+      var k3=deriv(x.map(function(v,i){return v+dt/2*k2[i];}),t+dt/2);
+      var k4=deriv(x.map(function(v,i){return v+dt*k3[i];}),t+dt);
+      return x.map(function(v,i){return v+dt/6*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);});
+    }
+    var x=[0,0,0,0], t=0, pitchAngle=0;
+    this.step = function(dt){
+      var sub=4, h=dt/sub;
+      for(var i=0;i<sub;i++){ x = rk4(x,t,h); pitchAngle += x[1]*h; t+=h; }
+    };
+    this.draw = function(g,w,h){
+      g.fillStyle="rgb("+C.void+")"; g.fillRect(0,0,w,h);
+      var cx=w/2, cy=h/2;
+      var pitchPx = Math.max(-h*0.35, Math.min(h*0.35, pitchAngle*(h*0.9)));
+      g.strokeStyle="rgba("+C.dim+",0.6)"; g.lineWidth=1.5;
+      g.beginPath(); g.moveTo(0, cy+pitchPx); g.lineTo(w, cy+pitchPx); g.stroke();
+      g.fillStyle="rgb("+C.aircraft+")";
+      var wing=22, body=5;
+      g.fillRect(cx-wing/2, cy-1.5, wing, 3);
+      g.beginPath();
+      g.moveTo(cx, cy-body); g.lineTo(cx-3, cy+body*0.6); g.lineTo(cx+3, cy+body*0.6);
+      g.closePath(); g.fill();
+    };
+  }
+
   function makeSim(kind) {
     if (kind === "pendulum") return new PendulumSim();
     if (kind === "robot") return new RobotSim();
     if (kind === "acc") return new AccSim();
     if (kind === "suspension") return new SuspensionSim();
     if (kind === "veh14") return new Veh14Sim();
+    if (kind === "aircraft") return new AircraftSim();
     return new QueuedSim();
   }
 
