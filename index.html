@@ -4,6 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bennett Daniel — Robotics &amp; Control Systems</title>
+<script>
+// Resolve the theme before first paint, so there is no flash of the wrong
+// palette. Priority: explicit user choice (localStorage) > OS preference >
+// time of day (night = dark), same order any normal app would use.
+(function () {
+  "use strict";
+  try {
+    var KEY = "portfolio-theme";
+    var stored = localStorage.getItem(KEY);
+    var theme;
+    if (stored === "light" || stored === "dark") {
+      theme = stored;
+    } else {
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var h = new Date().getHours();
+      var night = (h >= 19 || h < 7);
+      theme = (prefersDark || night) ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", theme);
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -11,11 +35,33 @@
 <style>
   /*
     Achromatic shell. The only chromatic light on this page comes from the
-    project cards themselves, each carrying the hue of its own project page
-    (green = Double Pendulum, gold = Robot Navigation, grey = not yet built).
-    Single committed dark world, matching the project pages.
+    project cards themselves, each carrying the hue of its own project page.
+    Single committed light world, matching the project pages.
   */
   :root {
+    --void: #fafbfc;
+    --deep: #f1f3f5;
+    --panel: #ffffff;
+    --panel-2: #eef0f3;
+    --ink: #14181d;
+    --dim: #4c5560;
+    --dimmer: #68727b;
+    --line: rgba(20,24,29,0.18);
+    --line-soft: rgba(20,24,29,0.09);
+    --scrim-rgb: 250,251,252;
+    /* Text sitting on a bright per-project accent chip (card CTA, dot
+       backgrounds): stays dark regardless of shell theme, since the accent
+       hues themselves don't change between light and dark mode. */
+    --on-accent: #14181d;
+
+    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* Dark mode: the original palette this site launched with, kept alive as
+     an explicit alternative rather than replaced. */
+  :root[data-theme="dark"] {
     --void: #08090a;
     --deep: #0d0f11;
     --panel: #121417;
@@ -25,10 +71,7 @@
     --dimmer: #4d545b;
     --line: rgba(236,238,240,0.10);
     --line-soft: rgba(236,238,240,0.055);
-
-    --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
-    --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --scrim-rgb: 8,9,10;
   }
 
   * { box-sizing: border-box; }
@@ -42,20 +85,31 @@
     font-size: 16px;
     line-height: 1.6;
     overflow-x: hidden;
+    transition: background 0.2s ease, color 0.2s ease;
   }
 
-  .shell { position: relative; min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+  .shell {
+    position: relative; height: 100vh;
+    display: grid; grid-template-columns: minmax(270px, 320px) 1fr;
+    overflow: hidden;
+  }
 
   /* Hand-off to a project page: the shell fades before navigation so the two
      documents read as one continuous move. */
   body { transition: opacity 0.26s ease; }
   body.leaving { opacity: 0; }
 
-  /* ---------------- Masthead ---------------- */
-  .masthead {
+  /* ---------------- Sidebar ---------------- */
+  .sidebar {
     position: relative; z-index: 5;
-    display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 24px; padding: 30px 34px 0; flex-wrap: wrap;
+    display: flex; flex-direction: column;
+    gap: 16px;
+    padding: 26px 22px 20px;
+    border-right: 1px solid var(--line-soft);
+    overflow-y: auto;   /* last-resort safety net for very short windows —
+                            scoped to the sidebar only, never the whole page */
+    min-height: 0;      /* without this a flex child's auto min-height can
+                            silently defeat overflow-y: auto */
   }
   .ident .name {
     font-family: var(--font-display); font-weight: 700; font-size: 1.06rem;
@@ -65,10 +119,11 @@
     font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--dim); margin: 5px 0 0;
   }
+  .bio { font-size: 0.78rem; line-height: 1.5; color: var(--dim); margin: 0; }
   .status {
     font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--dimmer); text-align: right;
-    display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+    text-transform: uppercase; color: var(--dimmer);
+    display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
   }
   .status .live { display: inline-flex; align-items: center; gap: 7px; color: var(--dim); }
   .status .live::before {
@@ -77,9 +132,24 @@
   }
   @keyframes blip { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
 
+  .theme-toggle {
+    appearance: none; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 3px;
+    color: var(--dim); font-family: var(--font-mono); font-size: 0.62rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 6px 9px; margin-top: 2px;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--ink); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  /* Floats over the stage's top-right corner rather than crowding the
+     sidebar. z-index above .card.selected (999) and the scrim (50) so a
+     rotating or expanded card can never visually cover it. */
+  .stage .theme-toggle { position: absolute; top: 14px; right: 16px; z-index: 1000; }
+
   /* ---------------- Stage ---------------- */
   .stage {
-    position: relative; min-height: 74vh; overflow: hidden;
+    position: relative; height: 100%; min-height: 0; overflow: hidden;
     touch-action: none; cursor: grab;
   }
   .stage.dragging { cursor: grabbing; }
@@ -89,9 +159,9 @@
      real contrast instead of reading straight off the wireframe. */
   .scrim {
     position: absolute; inset: 0; z-index: 50;
-    background: radial-gradient(ellipse at center, rgba(8,9,10,0.82) 0%, rgba(8,9,10,0.62) 55%, rgba(8,9,10,0.42) 100%);
+    background: radial-gradient(ellipse at center, rgba(var(--scrim-rgb),0.86) 0%, rgba(var(--scrim-rgb),0.68) 55%, rgba(var(--scrim-rgb),0.46) 100%);
     opacity: 0; pointer-events: none;
-    transition: opacity 0.42s ease;
+    transition: opacity 0.42s ease, background 0.2s ease;
   }
   .scrim.on { opacity: 1; }
 
@@ -124,7 +194,7 @@
   .card.hidden { display: none; }
   .card.selected {
     width: 328px; z-index: 999 !important; cursor: default;
-    max-height: 92%; overflow-y: auto;   /* safety on short viewports */
+    max-height: min(92%, 88vh); overflow-y: auto;   /* safety on short viewports */
   }
   .card.dimmed { pointer-events: none; }
 
@@ -163,7 +233,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em;
     text-transform: uppercase; text-decoration: none;
-    color: var(--void); border: 1px solid transparent; border-radius: 2px;
+    color: var(--on-accent); border: 1px solid transparent; border-radius: 2px;
     padding: 10px 12px; transition: filter 0.15s ease;
   }
   .card-cta:hover { filter: brightness(1.07); }
@@ -174,21 +244,21 @@
   }
 
   /* ---------------- Index ---------------- */
-  .index { position: relative; z-index: 5; border-top: 1px solid var(--line-soft); padding: 18px 34px 30px; }
+  .index { position: relative; z-index: 5; border-top: 1px solid var(--line-soft); padding: 14px 0 0; margin: 0; }
   .index-head {
     font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.16em;
-    text-transform: uppercase; color: var(--dimmer); margin: 0 0 12px;
+    text-transform: uppercase; color: var(--dimmer); margin: 0 0 10px;
   }
   .index-list {
     list-style: none; margin: 0; padding: 0;
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    display: flex; flex-direction: column;
     gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft);
   }
   .index-list li { background: var(--void); }
   .index-list a {
-    display: flex; align-items: baseline; gap: 9px; padding: 11px 13px;
+    display: flex; align-items: baseline; gap: 8px; padding: 8px 10px;
     text-decoration: none; color: var(--dim);
-    font-family: var(--font-mono); font-size: 0.72rem; transition: background 0.18s ease, color 0.18s ease;
+    font-family: var(--font-mono); font-size: 0.7rem; transition: background 0.18s ease, color 0.18s ease;
   }
   .index-list a:hover, .index-list a:focus-visible, .index-list a.active {
     background: var(--panel-2); color: var(--ink); outline: none;
@@ -197,11 +267,23 @@
   .index-list .idx { color: var(--dimmer); font-size: 0.64rem; }
 
   @media (max-width: 820px) {
-    .masthead { padding: 22px 20px 0; }
-    .stage { min-height: 60vh; }
+    /* Sidebar+stage side-by-side doesn't work in a phone-width viewport —
+       fall back to the normal stacked, scrolling document flow. */
+    .shell { height: auto; min-height: 100vh; display: block; overflow: visible; }
+    .sidebar {
+      border-right: none; border-bottom: 1px solid var(--line-soft);
+      overflow-y: visible; padding: 22px 20px 18px;
+    }
+    .stage { height: auto; min-height: 60vh; }
     .card { width: 146px; }
     .card.selected { width: min(300px, calc(100vw - 40px)); }
-    .index { padding: 16px 20px 26px; }
+    .index { padding: 16px 0 0; }
+  }
+
+  @media (min-width: 821px) {
+    /* Second line of defense: guarantees no page-level scrollbar can appear
+       on desktop even if a future change slips past .shell's own overflow. */
+    body { overflow-y: hidden; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -215,27 +297,31 @@
 
 <div class="shell">
 
-  <header class="masthead">
+  <aside class="sidebar">
     <div class="ident">
       <p class="name">Bennett Daniel</p>
       <p class="disc">Robotics &middot; Control Systems &middot; Vehicle Dynamics</p>
     </div>
+
+    <p class="bio">Hey, I'm Bennett Daniel 👋, Mechanical engineer with a Master's from UT Dallas, focused on control systems, vehicle dynamics, and autonomous driving. I've designed an electronic stability controller that cut brake-system weight by 4 kg, built cost-based path-planning algorithms in ROS2 for autonomous navigation, and led cross-functional teams from modeling and simulation through real-world validation. Currently teaching robotics and controls at the high-school level while building toward my next role accelerating autonomous vehicle development.</p>
+
     <div class="status">
       <span class="live" id="status-count">2 projects live</span>
       <span id="status-sub">5 queued</span>
     </div>
-  </header>
+
+    <nav class="index" aria-label="All projects">
+      <p class="index-head">Index</p>
+      <ul class="index-list" id="index-list"></ul>
+    </nav>
+  </aside>
 
   <main class="stage" id="stage">
     <canvas id="globe"></canvas>
     <div class="scrim" id="scrim"></div>
     <p class="stage-hint" id="stage-hint">Drag to rotate &nbsp;·&nbsp; Select a card to read more</p>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Cycle color theme: auto, light, dark"></button>
   </main>
-
-  <nav class="index" aria-label="All projects">
-    <p class="index-head">Index</p>
-    <ul class="index-list" id="index-list"></ul>
-  </nav>
 
 </div>
 
@@ -248,10 +334,10 @@
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   var C = {
-    void: "8,9,10",
-    ink: "236,238,240",
-    dim: "121,128,136",
-    dimmer: "77,84,91",
+    void: "250,251,252",
+    ink: "20,24,29",
+    dim: "76,85,96",
+    dimmer: "104,114,123",
     pendulum: "52,226,160",
     robot: "255,207,63",
     acc: "63,169,255",
@@ -265,49 +351,49 @@
   var PROJECTS = [
     {
       id: "pendulum", title: "Double Pendulum", kind: "Live",
-      rgb: C.pendulum, hex: "#34e2a0",
+      rgb: C.pendulum, hex: "#34e2a0", titleLight: "#117e58",
       url: "projects/double-pendulum.html", sim: "pendulum",
       blurb: "Two coupled rods, exact Lagrangian equations, and a 0.05° starting nudge that grows into total divergence. Chaos you can reach in and perturb yourself.",
       meta: ["Lagrangian mechanics", "RK4", "Chaos"]
     },
     {
       id: "robot", title: "Robot Navigation", kind: "Live",
-      rgb: C.robot, hex: "#ffcf3f",
+      rgb: C.robot, hex: "#ffcf3f", titleLight: "#956607",
       url: "projects/robot-navigation.html", sim: "robot",
       blurb: "A grid where every move can slide sideways, and the slip odds depend on momentum. Backward induction over 1,681 states, stress-tested live.",
       meta: ["Dynamic programming", "Stochastic MDP", "Monte Carlo"]
     },
     {
       id: "acc", title: "Adaptive Cruise Control", kind: "Live",
-      rgb: C.acc, hex: "#3fa9ff",
+      rgb: C.acc, hex: "#3fa9ff", titleLight: "#1670c2",
       url: "projects/adaptive-cruise-control.html", sim: "acc",
       blurb: "A PID spacing controller proven not for one vehicle but for every vehicle within ±7% mass and ±30% drag of nominal — sensitivity solved exactly, robustness found by randomized worst-case search, run continuously.",
       meta: ["PID pole placement", "Sensitivity analysis", "Monte Carlo"]
     },
     {
       id: "veh14", title: "14-DOF Vehicle Model", kind: "Live",
-      rgb: C.veh14, hex: "#ff5c5c",
+      rgb: C.veh14, hex: "#ff5c5c", titleLight: "#d02c32",
       url: "projects/vehicle-14dof.html", sim: "veh14",
       blurb: "A car corners on its actual Magic Formula tire curve — real mass, inertia, and geometry pulled from the 14-DOF reference model, driven through a single-track handling model until the front tires visibly run out of grip.",
       meta: ["Magic Formula tire", "Nonlinear handling", "Bicycle model"]
     },
     {
       id: "suspension", title: "Active Suspension", kind: "Live",
-      rgb: C.suspension, hex: "#b98cff",
+      rgb: C.suspension, hex: "#b98cff", titleLight: "#8347e0",
       url: "projects/active-suspension.html", sim: "suspension",
       blurb: "A quarter-car LQR compensator, its Riccati equation solved and verified live in-browser — one dial trades ride comfort for suspension control, continuously, against the same road bump.",
       meta: ["LQR", "Riccati equation", "Quarter-car"]
     },
     {
       id: "aircraft", title: "Aircraft Pitch Control", kind: "Live",
-      rgb: C.aircraft, hex: "#38e0d0",
+      rgb: C.aircraft, hex: "#38e0d0", titleLight: "#0c7d71",
       url: "projects/aircraft-pitch.html", sim: "aircraft",
       blurb: "A lightly-damped short-period pitch response tracking a real ±15°/s command through a real ±20° elevator limit — LQR with integral action, its Riccati equation solved and verified live in-browser.",
       meta: ["LQR + integral action", "Riccati equation", "Flight dynamics"]
     },
     {
       id: "solar", title: "Solar Racing Vehicle", kind: "Live",
-      rgb: C.solar, hex: "#ff9a3c",
+      rgb: C.solar, hex: "#ff9a3c", titleLight: "#a65d17",
       url: "projects/solar-racing.html", sim: "solar",
       blurb: "Longitudinal performance model for a solar race car: rolling and aerodynamic resistance, motor torque curves, and the traction limit that caps acceleration — integrated live from rest, not estimated from a single terminal value.",
       meta: ["Longitudinal dynamics", "Powertrain", "Traction limit"]
@@ -452,7 +538,9 @@
   function PendulumSim() {
     var P = { l1: 1, l2: 1, m1: 1, m2: 1, g: 9.8 };
     var z = [86 * Math.PI / 180, 172 * Math.PI / 180, 0, 0];
-    var cleared = false;
+    // An own property (not a closure var) so a theme switch can force a
+    // full repaint instead of blending the new background into old trails.
+    this.cleared = false;
     function deriv(s) {
       var q1 = s[0], q2 = s[1], q1d = s[2], q2d = s[3];
       var c = Math.cos(q1 - q2), sn = Math.sin(q1 - q2);
@@ -480,7 +568,7 @@
       for (var i = 0; i < 6; i++) z = rk4(z, d / 6);
     };
     this.draw = function (g, w, h) {
-      if (!cleared) { g.fillStyle = "rgb(" + C.void + ")"; g.fillRect(0, 0, w, h); cleared = true; }
+      if (!this.cleared) { g.fillStyle = "rgb(" + C.void + ")"; g.fillRect(0, 0, w, h); this.cleared = true; }
       g.fillStyle = "rgba(" + C.void + ",0.19)";
       g.fillRect(0, 0, w, h);
       var cx = w / 2, cy = h * 0.40, sc = Math.min(w, h) * 0.5 / 2.25;
@@ -955,6 +1043,76 @@
     return new QueuedSim();
   }
 
+  // ---------------- Theme ----------------
+  // Same three-way precedence as the <head> bootstrap (explicit choice >
+  // system preference > time of day), plus the piece a CSS media query
+  // can't do alone: keeping the canvas-drawn sphere (colors baked into
+  // template strings, not CSS) in sync, and re-checking as the OS setting
+  // or the clock changes while the page is open.
+  var THEME_KEY = "portfolio-theme";
+  var THEME_C = {
+    light: { void: "250,251,252", ink: "20,24,29", dim: "76,85,96", dimmer: "104,114,123" },
+    dark:  { void: "8,9,10", ink: "236,238,240", dim: "121,128,136", dimmer: "77,84,91" }
+  };
+  var currentTheme = "light";
+  // A live card's title is set straight to its project's hue for readable
+  // hue-identity — but that hue was tuned against a dark card panel. On the
+  // light panel the same hex is too pale to read (per-hue contrast as low as
+  // ~1.5:1), so titleLight is a darkened, hue-preserving stand-in used only
+  // in light mode; dark mode keeps the original.
+  function titleColorFor(p, theme) {
+    if (p.kind !== "Live") return "var(--dim)";
+    return theme === "dark" ? p.hex : (p.titleLight || p.hex);
+  }
+  function applyCanvasTheme(theme) {
+    currentTheme = theme;
+    var t = THEME_C[theme] || THEME_C.light;
+    C.void = t.void; C.ink = t.ink; C.dim = t.dim; C.dimmer = t.dimmer;
+    PROJECTS.forEach(function (p) {
+      if (p.simObj && "cleared" in p.simObj) p.simObj.cleared = false;
+      if (p.cardTitleEl) p.cardTitleEl.style.color = titleColorFor(p, theme);
+    });
+  }
+  function storedThemePref() {
+    try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; }
+  }
+  var themeMq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  function autoTheme() {
+    var h = new Date().getHours();
+    var night = (h >= 19 || h < 7);
+    return ((themeMq && themeMq.matches) || night) ? "dark" : "light";
+  }
+  var themeBtn = document.getElementById("theme-toggle");
+  function themeLabel(mode, theme) {
+    return mode === "auto" ? ("Auto · " + (theme === "dark" ? "Dark" : "Light")) : (theme === "dark" ? "Dark" : "Light");
+  }
+  function refreshTheme() {
+    var pref = storedThemePref();
+    var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+    var theme = mode === "auto" ? autoTheme() : mode;
+    document.documentElement.setAttribute("data-theme", theme);
+    applyCanvasTheme(theme);
+    if (themeBtn) themeBtn.textContent = themeLabel(mode, theme);
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener("click", function () {
+      var pref = storedThemePref();
+      var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+      var next = mode === "auto" ? "light" : (mode === "light" ? "dark" : "auto");
+      try {
+        if (next === "auto") localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next);
+      } catch (e) {}
+      refreshTheme();
+    });
+  }
+  if (themeMq && themeMq.addEventListener) {
+    themeMq.addEventListener("change", function () { if (!storedThemePref()) refreshTheme(); });
+  }
+  // Time of day has no change event, so poll gently for it — only matters
+  // while the user hasn't pinned an explicit light/dark choice.
+  setInterval(function () { if (!storedThemePref()) refreshTheme(); }, 5 * 60 * 1000);
+  refreshTheme();
+
   // ---------------- Build cards ----------------
   PROJECTS.forEach(function (p, i) {
     var el = document.createElement("div");
@@ -986,7 +1144,7 @@
     p.cctx = p.canvas.getContext("2d");
     p.simObj = makeSim(p.sim);
     p.cardTitleEl = el.querySelector(".card-title");
-    p.cardTitleEl.style.color = p.kind === "Live" ? p.hex : "var(--dim)";
+    p.cardTitleEl.style.color = titleColorFor(p, currentTheme);
     p.sized = false;
     p.visible = true;
 

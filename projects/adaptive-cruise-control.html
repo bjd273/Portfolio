@@ -4,6 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Adaptive Cruise Control</title>
+<script>
+// Resolve the theme before first paint, so there is no flash of the wrong
+// palette. Priority: explicit user choice (localStorage) > OS preference >
+// time of day (night = dark) — shared across the whole site via the same key.
+(function () {
+  "use strict";
+  try {
+    var KEY = "portfolio-theme";
+    var stored = localStorage.getItem(KEY);
+    var theme;
+    if (stored === "light" || stored === "dark") {
+      theme = stored;
+    } else {
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var h = new Date().getHours();
+      var night = (h >= 19 || h < 7);
+      theme = (prefersDark || night) ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", theme);
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -12,10 +36,31 @@
   /*
     Single-hue identity: this project is "blue" — a road/highway-signal blue,
     varied only by lightness/saturation, matching the green (pendulum) and
-    gold (robot navigation) system. Committed to one dark world on purpose
-    (no light-mode variant).
+    gold (robot navigation) system, in both the light and dark builds of
+    the shell below.
   */
   :root {
+    --bg: #f6fafd;
+    --surface: #eaf2f9;
+    --surface-2: #dceaf4;
+    --ink: #0b1d2b;
+    --ink-dim: #4f6b81;
+    --line: rgba(10,35,55,0.14);
+
+    --b-bright: #1670c2;               /* ego vehicle */
+    --b-bright-soft: rgba(22,112,194,0.14);
+    --b-deep: #17527d;                 /* lead vehicle */
+    --b-deep-soft: rgba(23,82,125,0.18);
+    --b-mid: #3d8fc4;                  /* worst-case sensitivity / synthesis */
+    --b-pale: #0a4a8f;                 /* the uncertainty numbers, the whole point */
+    /* Text on a bright accent chip (the primary button): white in light mode
+       (the light-mode blue is dark enough for white text), but dark in dark
+       mode (the dark-mode blue is much brighter, so white text fails contrast
+       there — dark ink wins instead). */
+    --on-accent: #fff;
+  }
+
+  :root[data-theme="dark"] {
     --bg: #050c14;
     --surface: #0a1622;
     --surface-2: #0f2030;
@@ -23,13 +68,16 @@
     --ink-dim: #7f97a8;
     --line: rgba(190,220,240,0.13);
 
-    --b-bright: #3fa9ff;               /* ego vehicle */
+    --b-bright: #3fa9ff;
     --b-bright-soft: rgba(63,169,255,0.14);
-    --b-deep: #1c5a8a;                 /* lead vehicle */
+    --b-deep: #1c5a8a;
     --b-deep-soft: rgba(28,90,138,0.18);
-    --b-mid: #5fc2e0;                  /* worst-case sensitivity / synthesis */
-    --b-pale: #b9e6ff;                 /* the uncertainty numbers, the whole point */
+    --b-mid: #5fc2e0;
+    --b-pale: #b9e6ff;
+    --on-accent: #0b1d2b;
+  }
 
+  :root {
     --radius-card: 12px;
     --radius-ui: 8px;
     --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
@@ -46,7 +94,24 @@
     font-family: var(--font-body);
     font-size: 17px;
     line-height: 1.6;
+    transition: background 0.2s ease, color 0.2s ease;
   }
+
+  .page-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 32px;
+  }
+  .page-topbar .backlink { margin-bottom: 0; }
+  .theme-toggle {
+    appearance: none; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--ink-dim); font-family: var(--font-mono); font-size: 0.66rem;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 7px 10px;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--b-bright); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--b-pale); outline-offset: 2px; }
 
   .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
 
@@ -127,7 +192,7 @@
   }
   button:hover { border-color: var(--b-bright); }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--b-pale); outline-offset: 2px; }
-  button.primary { background: var(--b-bright); border-color: var(--b-bright); color: var(--bg); font-weight: 600; }
+  button.primary { background: var(--b-bright); border-color: var(--b-bright); color: var(--on-accent); font-weight: 600; }
   button.primary:hover { filter: brightness(1.08); }
 
   /* ---------- Controls panel ---------- */
@@ -190,7 +255,10 @@
 
 <div class="page">
 
-  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+  <div class="page-topbar">
+    <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Cycle color theme: auto, light, dark"></button>
+  </div>
 
   <header class="hero">
     <div class="hero-text">
@@ -295,15 +363,62 @@ k_d = &minus;c + m&middot;(p + 2&zeta;&omega;<span class="dim">n</span>)
 (function () {
   "use strict";
 
-  var T = {
-    bg: "5,12,20",
-    bright: "63,169,255",
-    deep: "28,90,138",
-    mid: "95,194,224",
-    pale: "185,230,255",
-    ink: "234,242,248",
-    line: "190,220,240"
+  // ---------------- Theme ----------------
+  // Canvas colors live in JS (a <canvas> can't read CSS custom properties),
+  // so this mirrors the :root / [data-theme="dark"] tokens above by hand.
+  var T = { bg: "246,250,253", bright: "22,112,194", deep: "23,82,125", mid: "61,143,196", pale: "10,74,143", ink: "11,29,43", line: "10,35,55" };
+  var THEME_T = {
+    light: { bg: "246,250,253", bright: "22,112,194", deep: "23,82,125", mid: "61,143,196", pale: "10,74,143", ink: "11,29,43", line: "10,35,55" },
+    dark:  { bg: "5,12,20", bright: "63,169,255", deep: "28,90,138", mid: "95,194,224", pale: "185,230,255", ink: "234,242,248", line: "190,220,240" }
   };
+  var THEME_KEY = "portfolio-theme";
+  function applyCanvasTheme(theme) {
+    var t = THEME_T[theme] || THEME_T.light;
+    T.bg = t.bg; T.bright = t.bright; T.deep = t.deep; T.mid = t.mid; T.pale = t.pale; T.ink = t.ink; T.line = t.line;
+  }
+  function storedThemePref() {
+    try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; }
+  }
+  var themeMq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  function autoTheme() {
+    var h = new Date().getHours();
+    var night = (h >= 19 || h < 7);
+    return ((themeMq && themeMq.matches) || night) ? "dark" : "light";
+  }
+  var themeBtn = document.getElementById("theme-toggle");
+  function themeLabel(mode, theme) {
+    return mode === "auto" ? ("Auto · " + (theme === "dark" ? "Dark" : "Light")) : (theme === "dark" ? "Dark" : "Light");
+  }
+  // The error/sensitivity figures are one-shot renders (redrawn only when the
+  // batch is resampled), not part of an animation loop — so a theme switch
+  // needs to explicitly repaint them. Reassigned once those functions exist
+  // further down; a no-op before that is fine, since nothing has painted yet.
+  var redrawStaticFigures = function () {};
+  function refreshTheme() {
+    var pref = storedThemePref();
+    var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+    var theme = mode === "auto" ? autoTheme() : mode;
+    document.documentElement.setAttribute("data-theme", theme);
+    applyCanvasTheme(theme);
+    redrawStaticFigures();
+    if (themeBtn) themeBtn.textContent = themeLabel(mode, theme);
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener("click", function () {
+      var pref = storedThemePref();
+      var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+      var next = mode === "auto" ? "light" : (mode === "light" ? "dark" : "auto");
+      try {
+        if (next === "auto") localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next);
+      } catch (e) {}
+      refreshTheme();
+    });
+  }
+  if (themeMq && themeMq.addEventListener) {
+    themeMq.addEventListener("change", function () { if (!storedThemePref()) refreshTheme(); });
+  }
+  setInterval(function () { if (!storedThemePref()) refreshTheme(); }, 5 * 60 * 1000);
+  refreshTheme();
 
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -666,6 +781,7 @@ k_d = &minus;c + m&middot;(p + 2&zeta;&omega;<span class="dim">n</span>)
 
   syncLabels();
   buildBatch();
+  redrawStaticFigures = function () { renderErrPlot(); renderSensPlot(); };
   requestAnimationFrame(frame);
 })();
 </script>

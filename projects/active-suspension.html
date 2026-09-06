@@ -4,6 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Active Suspension</title>
+<script>
+// Resolve the theme before first paint, so there is no flash of the wrong
+// palette. Priority: explicit user choice (localStorage) > OS preference >
+// time of day (night = dark) — shared across the whole site via the same key.
+(function () {
+  "use strict";
+  try {
+    var KEY = "portfolio-theme";
+    var stored = localStorage.getItem(KEY);
+    var theme;
+    if (stored === "light" || stored === "dark") {
+      theme = stored;
+    } else {
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var h = new Date().getHours();
+      var night = (h >= 19 || h < 7);
+      theme = (prefersDark || night) ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", theme);
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -12,10 +36,32 @@
   /*
     Single-hue identity: this project is "violet" — varied only by
     lightness/saturation, matching green (pendulum), gold (robot nav), and
-    blue (adaptive cruise control). Committed to one dark world (no
-    light-mode variant).
+    blue (adaptive cruise control). The palette below works in both the
+    light and dark builds of the shell.
   */
   :root {
+    --bg: #faf8fd;
+    --surface: #f0eaf7;
+    --surface-2: #e4d9f0;
+    --ink: #1c1428;
+    --ink-dim: #665877;
+    --line: rgba(35,20,55,0.14);
+
+    --v-bright: #8347e0;               /* active (LQR) rig */
+    --v-bright-soft: rgba(131,71,224,0.14);
+    --v-deep: #5b3f82;                 /* passive rig */
+    --v-deep-soft: rgba(91,63,130,0.2);
+    --v-mid: #6f4fae;                  /* synthesis stat */
+    --v-pale: #5327a8;                 /* headline numbers, focus */
+
+    /* Text on a bright accent chip (the primary button / active mode button):
+       white in light mode (the light-mode violet is dark enough for white
+       text), but dark in dark mode (the dark-mode violet is much brighter, so
+       white text fails contrast there — dark ink wins instead). */
+    --on-accent: #fff;
+  }
+
+  :root[data-theme="dark"] {
     --bg: #0e0a16;
     --surface: #16101f;
     --surface-2: #1e1729;
@@ -23,13 +69,16 @@
     --ink-dim: #9184a3;
     --line: rgba(230,220,245,0.13);
 
-    --v-bright: #b98cff;               /* active (LQR) rig */
+    --v-bright: #b98cff;
     --v-bright-soft: rgba(185,140,255,0.14);
-    --v-deep: #5b3f82;                 /* passive rig */
+    --v-deep: #5b3f82;
     --v-deep-soft: rgba(91,63,130,0.2);
-    --v-mid: #8f6bcf;                  /* synthesis stat */
-    --v-pale: #ddccf5;                 /* headline numbers, focus */
+    --v-mid: #8f6bcf;
+    --v-pale: #ddccf5;
+    --on-accent: #1c1428;
+  }
 
+  :root {
     --radius-card: 12px;
     --radius-ui: 8px;
     --font-display: 'Sora', ui-sans-serif, system-ui, sans-serif;
@@ -46,7 +95,24 @@
     font-family: var(--font-body);
     font-size: 17px;
     line-height: 1.6;
+    transition: background 0.2s ease, color 0.2s ease;
   }
+
+  .page-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 32px;
+  }
+  .page-topbar .backlink { margin-bottom: 0; }
+  .theme-toggle {
+    appearance: none; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--ink-dim); font-family: var(--font-mono); font-size: 0.66rem;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 7px 10px;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--v-bright); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--v-pale); outline-offset: 2px; }
 
   .page { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
 
@@ -126,7 +192,7 @@
   }
   button:hover { border-color: var(--v-bright); }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--v-pale); outline-offset: 2px; }
-  button.primary { background: var(--v-bright); border-color: var(--v-bright); color: var(--bg); font-weight: 600; }
+  button.primary { background: var(--v-bright); border-color: var(--v-bright); color: var(--on-accent); font-weight: 600; }
   button.primary:hover { filter: brightness(1.08); }
 
   /* ---------- Controls panel ---------- */
@@ -164,7 +230,7 @@
   .mode-btn.active {
     background: var(--v-bright);
     border-color: var(--v-bright);
-    color: var(--bg);
+    color: var(--on-accent);
     font-weight: 600;
   }
   .panel-note { margin-top: 14px; font-family: var(--font-mono); font-size: 0.76rem; color: var(--ink-dim); }
@@ -203,7 +269,10 @@
 
 <div class="page">
 
-  <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+  <div class="page-topbar">
+    <a class="backlink" href="../index.html"><span aria-hidden="true">&larr;</span> Portfolio</a>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Cycle color theme: auto, light, dark"></button>
+  </div>
 
   <header class="hero">
     <div class="hero-text">
@@ -304,14 +373,40 @@ m<span class="dim">w</span>&middot;x&#776;<span class="dim">w</span> = k<span cl
   "use strict";
 
   var T = {
-    bg: "14,10,22",
-    bright: "185,140,255",
+    bg: "250,248,253",
+    bright: "131,71,224",
     deep: "91,63,130",
-    mid: "143,107,207",
-    pale: "221,204,245",
-    ink: "242,237,247",
-    line: "230,220,245"
+    mid: "111,79,174",
+    pale: "83,39,168",
+    ink: "28,20,40",
+    line: "35,20,55"
   };
+
+  // ---------------- Theme ----------------
+  // Canvas colors live in JS (a <canvas> can't read CSS custom properties),
+  // so this mirrors the :root / [data-theme="dark"] tokens above by hand.
+  var THEME_T = {
+    light: { bg: "250,248,253", bright: "131,71,224", deep: "91,63,130", mid: "111,79,174", pale: "83,39,168", ink: "28,20,40", line: "35,20,55" },
+    dark:  { bg: "14,10,22", bright: "185,140,255", deep: "91,63,130", mid: "143,107,207", pale: "221,204,245", ink: "242,237,247", line: "230,220,245" }
+  };
+  var THEME_KEY = "portfolio-theme";
+  function applyCanvasTheme(theme) {
+    var t = THEME_T[theme] || THEME_T.light;
+    T.bg = t.bg; T.bright = t.bright; T.deep = t.deep; T.mid = t.mid; T.pale = t.pale; T.ink = t.ink; T.line = t.line;
+  }
+  function storedThemePref() {
+    try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; }
+  }
+  var themeMq = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  function autoTheme() {
+    var h = new Date().getHours();
+    var night = (h >= 19 || h < 7);
+    return ((themeMq && themeMq.matches) || night) ? "dark" : "light";
+  }
+  var themeBtn = document.getElementById("theme-toggle");
+  function themeLabel(mode, theme) {
+    return mode === "auto" ? ("Auto · " + (theme === "dark" ? "Dark" : "Light")) : (theme === "dark" ? "Dark" : "Light");
+  }
 
   var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -482,6 +577,36 @@ m<span class="dim">w</span>&middot;x&#776;<span class="dim">w</span> = k<span cl
   btnBump.addEventListener("click", function () {
     simT = 0; xActive = [0, 0, 0, 0]; xPassive = [0, 0, 0, 0];
   });
+
+  // Response charts (abPlot/sdPlot) are one-shot renders — drawn only on
+  // init and whenever the tune slider/mode buttons change the gain, never
+  // inside the continuous rAF loop — so a theme toggle must explicitly
+  // redraw them or they'd keep the old palette's colors indefinitely.
+  var redrawStaticFigures = function () {};
+  function refreshTheme() {
+    var pref = storedThemePref();
+    var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+    var theme = mode === "auto" ? autoTheme() : mode;
+    document.documentElement.setAttribute("data-theme", theme);
+    applyCanvasTheme(theme);
+    redrawStaticFigures();
+    if (themeBtn) themeBtn.textContent = themeLabel(mode, theme);
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener("click", function () {
+      var pref = storedThemePref();
+      var mode = (pref === "light" || pref === "dark") ? pref : "auto";
+      var next = mode === "auto" ? "light" : (mode === "light" ? "dark" : "auto");
+      try {
+        if (next === "auto") localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, next);
+      } catch (e) {}
+      refreshTheme();
+    });
+  }
+  if (themeMq && themeMq.addEventListener) {
+    themeMq.addEventListener("change", function () { if (!storedThemePref()) refreshTheme(); });
+  }
+  setInterval(function () { if (!storedThemePref()) refreshTheme(); }, 5 * 60 * 1000);
 
   function updateStatsDom() {
     var abVal = dot(ca, xActive) + (1e3 / mb) * lastFs;
@@ -666,6 +791,8 @@ m<span class="dim">w</span>&middot;x&#776;<span class="dim">w</span> = k<span cl
   syncLabel();
   syncModeButtons();
   buildCharts();
+  redrawStaticFigures = function () { buildCharts(); };
+  refreshTheme();
   requestAnimationFrame(frame);
 })();
 </script>
